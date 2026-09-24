@@ -26,7 +26,6 @@ from veyl_api.db.base import utcnow
 from veyl_api.enums import (
     ACTIVE_FINDING_STATUSES,
     BusinessCriticality,
-    FindingStatus,
     Provenance,
     ReportKind,
     Severity,

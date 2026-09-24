@@ -6,4 +6,6 @@ belongs to the rule engine, which is why every finding can name the exact
 observation it came from.
 """
 
-__all__ = ["contracts"]
+from veyl_scanner.runner import ScanOutcome, ScanRunner
+
+__all__ = ["ScanOutcome", "ScanRunner"]

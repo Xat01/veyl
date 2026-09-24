@@ -116,6 +116,10 @@ ignore = [
 "tests/**" = ["S", "ARG", "E501"]
 "demo/**" = ["S", "ARG"]
 "scripts/**" = ["S", "ARG", "E501"]
+# The report renderers embed a complete HTML document, including CSS, as a
+# module-level template. Wrapping those declarations to satisfy a line-length
+# rule would make the stylesheet harder to read for no benefit.
+"services/reporting/veyl_reporting/renderers.py" = ["E501"]
 
 [tool.mypy]
 python_version = "3.11"

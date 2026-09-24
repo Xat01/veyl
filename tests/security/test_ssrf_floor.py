@@ -18,7 +18,6 @@ import ipaddress
 
 import pytest
 
-from veyl_api.safety import firewall as firewall_module
 from veyl_api.safety.firewall import (
     TargetRejection,
     TargetRejectionReason,
@@ -30,13 +29,20 @@ from veyl_api.safety.firewall import (
 
 
 @pytest.fixture()
-def production_policy(monkeypatch):
-    """Force the firewall into the strict posture a real deployment uses."""
-    settings = firewall_module.settings
-    monkeypatch.setattr(settings, "env", "production", raising=False)
-    monkeypatch.setattr(settings, "allow_private_targets", False, raising=False)
-    monkeypatch.setattr(settings, "always_block_metadata", True, raising=False)
-    return settings
+def production_policy():
+    """Force the firewall into the strict posture a real deployment uses.
+
+    Uses the supported override context rather than mutating the settings
+    object, so the change is scoped to the test and restored even if it fails.
+    """
+    from veyl_api.config import overridden_settings
+
+    with overridden_settings(
+        env="production",
+        allow_private_targets=False,
+        always_block_metadata=True,
+    ) as settings:
+        yield settings
 
 
 @pytest.mark.parametrize(
@@ -90,15 +96,14 @@ def test_no_ssrf_vector_is_ever_allowed(address, production_policy):
     assert classify_address(ipaddress.ip_address(address)) is not None
 
 
-def test_metadata_is_blocked_unconditionally(monkeypatch):
+def test_metadata_is_blocked_unconditionally():
     """Even under a permissive policy, the metadata endpoints stay blocked."""
-    settings = firewall_module.settings
-    monkeypatch.setattr(settings, "allow_private_targets", True, raising=False)
-    monkeypatch.setattr(settings, "env", "development", raising=False)
-    monkeypatch.setattr(settings, "always_block_metadata", True, raising=False)
+    from veyl_api.config import overridden_settings
 
-    for address in ("169.254.169.254", "fd00:ec2::254", "100.100.100.200", "192.0.0.192"):
-        assert classify_address(ipaddress.ip_address(address)) is not None
+    with overridden_settings(allow_private_targets=True, env="development",
+                             always_block_metadata=True):
+        for address in ("169.254.169.254", "fd00:ec2::254", "100.100.100.200", "192.0.0.192"):
+            assert classify_address(ipaddress.ip_address(address)) is not None
 
 
 @pytest.mark.parametrize(
@@ -159,16 +164,17 @@ def test_validate_target_refuses_bare_hostname_without_dot(production_policy):
     assert rejection.reason is TargetRejectionReason.INVALID_HOSTNAME
 
 
-def test_private_addresses_allowed_only_when_explicitly_permitted(monkeypatch):
+def test_private_addresses_allowed_only_when_explicitly_permitted():
     """The private-address policy must be honoured, not bypassed."""
-    settings = firewall_module.settings
+    from veyl_api.config import overridden_settings
+
     addr = ipaddress.ip_address("10.0.0.5")
 
-    monkeypatch.setattr(settings, "allow_private_targets", False, raising=False)
-    assert classify_address(addr) is TargetRejectionReason.PRIVATE
+    with overridden_settings(allow_private_targets=False):
+        assert classify_address(addr) is TargetRejectionReason.PRIVATE
 
-    monkeypatch.setattr(settings, "allow_private_targets", True, raising=False)
-    assert classify_address(addr) is None
+    with overridden_settings(allow_private_targets=True):
+        assert classify_address(addr) is None
 
 
 def test_loopback_is_refused_in_a_public_deployment(production_policy):
@@ -177,20 +183,20 @@ def test_loopback_is_refused_in_a_public_deployment(production_policy):
     assert classify_address(addr) is TargetRejectionReason.LOOPBACK
 
 
-def test_loopback_is_permitted_only_in_a_local_development_env(monkeypatch):
+def test_loopback_is_permitted_only_in_a_local_development_env():
     """The demo exception is narrow: development/test only, and opt-in."""
-    settings = firewall_module.settings
+    from veyl_api.config import overridden_settings
+
     addr = ipaddress.ip_address("127.0.0.1")
 
-    monkeypatch.setattr(settings, "allow_private_targets", True, raising=False)
-    monkeypatch.setattr(settings, "env", "development", raising=False)
-    assert classify_address(addr) is None
+    with overridden_settings(allow_private_targets=True, env="development"):
+        assert classify_address(addr) is None
 
-    monkeypatch.setattr(settings, "env", "staging", raising=False)
-    assert classify_address(addr) is TargetRejectionReason.LOOPBACK
+    with overridden_settings(allow_private_targets=True, env="staging"):
+        assert classify_address(addr) is TargetRejectionReason.LOOPBACK
 
-    monkeypatch.setattr(settings, "env", "production", raising=False)
-    assert classify_address(addr) is TargetRejectionReason.LOOPBACK
+    with overridden_settings(allow_private_targets=True, env="production"):
+        assert classify_address(addr) is TargetRejectionReason.LOOPBACK
 
 
 def test_rejection_is_explainable():
