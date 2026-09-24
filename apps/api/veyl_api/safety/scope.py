@@ -217,7 +217,9 @@ class ScopeGuard:
             target=target, allowed=False, rejection=rejection, candidate_entries=candidates
         )
 
-    def resolve_scope_entry_for(self, target: str, resolved_addresses: list[str] | None = None) -> ScopeEntry | None:
+    def resolve_scope_entry_for(
+        self, target: str, resolved_addresses: list[str] | None = None
+    ) -> ScopeEntry | None:
         """Return the authorizing entry for a target, or None."""
         decision = self.check(target, resolved_addresses=resolved_addresses)
         return decision.match.entry if decision.match else None

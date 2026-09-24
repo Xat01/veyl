@@ -310,7 +310,11 @@ def check_missing_frame_protection(context: RuleContext) -> list[RuleMatch]:
                     "click can trigger, which Veyl cannot determine externally."
                 ),
                 evidence=[
-                    _evidence_headers(obs, "x-frame-options and csp frame-ancestors both absent", "x-frame-options"),
+                    _evidence_headers(
+                        obs,
+                        "x-frame-options and csp frame-ancestors both absent",
+                        "x-frame-options",
+                    ),
                     {
                         "kind": "http_security_headers",
                         "matcher": "content-security-policy frame-ancestors absent",

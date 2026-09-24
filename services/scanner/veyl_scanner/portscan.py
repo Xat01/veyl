@@ -90,9 +90,7 @@ class TcpConnectScanner:
             for future in as_completed(futures):
                 result = future.result()
                 existing = by_port.get(result.port)
-                if existing is None:
-                    by_port[result.port] = result
-                elif existing.state != _STATE_OPEN and result.state == _STATE_OPEN:
+                if existing is None or existing.state != _STATE_OPEN and result.state == _STATE_OPEN:
                     by_port[result.port] = result
 
         return [by_port[port] for port in sorted(by_port)]

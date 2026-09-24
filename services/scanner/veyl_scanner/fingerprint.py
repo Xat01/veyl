@@ -131,7 +131,12 @@ _BANNER_RULES: tuple[tuple[re.Pattern[str], str, str | None, Confidence], ...] =
     (re.compile(r"^SSH-\d+\.\d+-(?P<product>[A-Za-z0-9_.\-]+?)[_ ](?P<version>[\w.\-p]+)", re.I),
      "ssh", "product", Confidence.HIGH),
     (re.compile(r"^SSH-2\.0-(?P<product>[A-Za-z0-9_.\-]+)", re.I), "ssh", "product", Confidence.MEDIUM),
-    (re.compile(r"^220[- ].*(?P<product>ProFTPD|vsFTPd|Pure-FTPd|FileZilla|Microsoft FTP)[ /](?P<version>[\d.p]+)?", re.I),
+    (
+        re.compile(
+            r"^220[- ].*(?P<product>ProFTPD|vsFTPd|Pure-FTPd|FileZilla|Microsoft FTP)"
+            r"[ /](?P<version>[\d.p]+)?",
+            re.I,
+        ),
      "ftp", "product", Confidence.HIGH),
     (re.compile(r"^220[- ].*Microsoft ESMTP", re.I), "smtp", None, Confidence.HIGH),
     (re.compile(r"^220[- ].*(?P<product>Postfix|Exim|Sendmail)(?: ESMTP)?(?: (?P<version>[\d.]+))?", re.I),
@@ -154,7 +159,7 @@ def _read_banner(sock: socket.socket, *, read: bool, timeout: float, max_bytes: 
         sock.settimeout(timeout)
         data = sock.recv(max_bytes)
         return data.decode("utf-8", errors="replace")
-    except (TimeoutError, socket.timeout, OSError):
+    except (TimeoutError, OSError):
         return ""
 
 
@@ -204,7 +209,7 @@ def fingerprint_port(
             if payload:
                 sock.sendall(payload)
             banner = _read_banner(sock, read=expect_read, timeout=min(timeout, 3.0))
-        except (TimeoutError, socket.timeout, OSError):
+        except (TimeoutError, OSError):
             banner = ""
         finally:
             if sock is not None:

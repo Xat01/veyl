@@ -15,7 +15,12 @@ import dns.exception
 import dns.resolver
 
 from veyl_api.enums import Confidence, Provenance
-from veyl_scanner.contracts import CollectResult, CollectorRegistration, ObservationPayload, ScanRequest
+from veyl_scanner.contracts import (
+    CollectorRegistration,
+    CollectResult,
+    ObservationPayload,
+    ScanRequest,
+)
 
 #: A short, high-signal wordlist. Veyl is not a brute-forcer: this exists to
 #: surface the names that are almost always live on real estates, and every hit
@@ -104,9 +109,7 @@ def resolve_records(
         try:
             if record_type in {"A", "AAAA"}:
                 out.append(str(answer.address))
-            elif record_type == "CNAME":
-                out.append(str(answer.target).rstrip("."))
-            elif record_type in {"NS", "PTR"}:
+            elif record_type == "CNAME" or record_type in {"NS", "PTR"}:
                 out.append(str(answer.target).rstrip("."))
             elif record_type == "MX":
                 out.append(str(answer.exchange).rstrip("."))

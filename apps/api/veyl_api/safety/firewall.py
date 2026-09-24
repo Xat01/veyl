@@ -183,41 +183,67 @@ def classify_address(
 ) -> TargetRejectionReason | None:
     """Return the reason an address is unsafe, or ``None`` if it is acceptable.
 
-    Order matters: metadata is checked before the broader private range so the
-    reason reported to the user is the most specific and most alarming one.
+    Order matters. The checks run most-specific first so the reason reported to
+    the user is the most alarming and most actionable one:
+
+    1. Embedded IPv4 inside an IPv6 wrapper. An IPv6 address that carries an
+       IPv4 address is a documented SSRF bypass, so it is unwrapped and the
+       inner address is classified instead.
+    2. Cloud metadata endpoints. Blocked unconditionally by default, even when
+       ``allow_private`` is on, because reaching these is the definition of an
+       SSRF success.
+    3. Address class checks. Loopback, link-local, multicast and unspecified are
+       always refused: they can never be a legitimate external assessment
+       target, and permitting them turns the scanner into a local proxy.
+    4. Private and reserved ranges. Refused unless the deployment has explicitly
+       opted into internal scanning via ``VEYL_ALLOW_PRIVATE_TARGETS``, which is
+       only correct for a trusted, non-public deployment.
     """
     if allow_private is None:
         allow_private = settings.allow_private_targets
 
-    # Guard the embedded-IPv4 cases first, since an IPv6 wrapper around 127.0.0.1
-    # would otherwise slip past the IPv4 checks entirely.
+    # 1. Unwrap IPv6 carriers of an IPv4 address.
     if isinstance(addr, ipaddress.IPv6Address):
         embedded = _embedded_ipv4(addr)
         if embedded is not None:
             embedded_reason = classify_address(embedded, allow_private=allow_private)
             if embedded_reason is not None:
+                # Report the inner reason: it is more specific and more useful
+                # than "it was wrapped in IPv6".
                 return embedded_reason
-            # Even if the embedded address is acceptable, an IPv6 wrapper is a
-            # signature of an attempt to obscure the real destination.
+            # The inner address is acceptable, but the wrapping is a signature
+            # of deliberate obfuscation. Refuse and say exactly that.
             return TargetRejectionReason.NAT64_EMBEDDED
 
+    # 2. Cloud metadata.
     if settings.always_block_metadata and addr in METADATA_ADDRESSES:
         return TargetRejectionReason.METADATA
+    # 100.64.0.0/10 (carrier-grade NAT) hosts metadata services on some clouds.
+    if (
+        settings.always_block_metadata
+        and isinstance(addr, ipaddress.IPv4Address)
+        and addr in ipaddress.ip_network("100.64.0.0/10")
+    ):
+        return TargetRejectionReason.METADATA
 
-    # 100.64.0.0/10 (carrier-grade NAT) is also used by some clouds for metadata.
-    if isinstance(addr, ipaddress.IPv4Address) and addr in ipaddress.ip_network("100.64.0.0/10"):
-        if settings.always_block_metadata:
-            return TargetRejectionReason.METADATA
-
+    # 3. Never legitimate under any policy.
     if addr.is_multicast:
         return TargetRejectionReason.MULTICAST
     if addr.is_unspecified:
         return TargetRejectionReason.UNSPECIFIED
     if addr.is_loopback:
+        # A loopback target can only reach the scanner's own host. Allowing it
+        # in a public deployment would turn Veyl into an SSRF proxy against
+        # itself, so it is refused irrespective of the private-address policy.
+        # An internal deployment that genuinely needs to assess its own
+        # loopback services must opt in explicitly and knowingly.
+        if allow_private and settings.env in ("development", "test"):
+            return None
         return TargetRejectionReason.LOOPBACK
     if addr.is_link_local:
         return TargetRejectionReason.LINK_LOCAL
 
+    # 4. Policy-controlled ranges.
     if not allow_private:
         if addr.is_private:
             return TargetRejectionReason.PRIVATE

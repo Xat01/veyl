@@ -8,7 +8,7 @@ a completed handshake, so the finding can always be reproduced and re-checked.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from veyl_api.enums import Confidence, RuleCategory, Severity
 from veyl_rules.framework import RuleContext, RuleDefinition, RuleMatch
@@ -20,7 +20,7 @@ def _parse(value: object) -> datetime | None:
     try:
         text = str(value).replace("Z", "+00:00")
         parsed = datetime.fromisoformat(text)
-        return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+        return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
     except (ValueError, TypeError):
         return None
 
@@ -29,7 +29,7 @@ def _days_remaining(not_after: object) -> int | None:
     parsed = _parse(not_after)
     if parsed is None:
         return None
-    return (parsed - datetime.now(timezone.utc)).days
+    return (parsed - datetime.now(UTC)).days
 
 
 def _cert_evidence(obs: dict, matcher: str) -> dict:
@@ -57,7 +57,7 @@ def check_expired_certificate(context: RuleContext) -> list[RuleMatch]:
     matches: list[RuleMatch] = []
     for obs in context.of_kind("tls_certificate"):
         not_after = _parse(obs.get("not_after"))
-        if not_after is None or not_after > datetime.now(timezone.utc):
+        if not_after is None or not_after > datetime.now(UTC):
             continue
         days = _days_remaining(obs.get("not_after"))
         matches.append(
@@ -95,7 +95,7 @@ def check_certificate_expiring_soon(context: RuleContext) -> list[RuleMatch]:
         not_after = _parse(obs.get("not_after"))
         if not_after is None:
             continue
-        days = (not_after - datetime.now(timezone.utc)).days
+        days = (not_after - datetime.now(UTC)).days
         if days < 0 or days > 30:
             continue
 
@@ -309,7 +309,7 @@ def check_untrusted_chain(context: RuleContext) -> list[RuleMatch]:
         if obs.get("is_self_signed"):
             continue
         not_after = _parse(obs.get("not_after"))
-        if not_after is not None and not_after <= datetime.now(timezone.utc):
+        if not_after is not None and not_after <= datetime.now(UTC):
             continue
 
         matches.append(

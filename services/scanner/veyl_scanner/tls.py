@@ -18,7 +18,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from cryptography import x509
@@ -26,7 +26,12 @@ from cryptography.hazmat.backends import default_backend
 from cryptography.x509.oid import ExtensionOID, NameOID
 
 from veyl_api.enums import Confidence, Provenance
-from veyl_scanner.contracts import CollectResult, CollectorRegistration, ObservationPayload, ScanRequest
+from veyl_scanner.contracts import (
+    CollectorRegistration,
+    CollectResult,
+    ObservationPayload,
+    ScanRequest,
+)
 
 CRT_SH_BASE = "https://crt.sh"
 _CRT_TIMEOUT = 12.0
@@ -100,12 +105,12 @@ def _parse_not_after(value: str) -> datetime:
     for fmt in ("%b %d %H:%M:%S %Y %Z", "%b %d %H:%M:%S %Y %z"):
         try:
             parsed = datetime.strptime(value.strip(), fmt)
-            return parsed.replace(tzinfo=timezone.utc)
+            return parsed.replace(tzinfo=UTC)
         except ValueError:
             continue
     # Last resort: return a far-future sentinel so nothing crashes; the raw
     # string is still stored in the observation.
-    return datetime(1970, 1, 1, tzinfo=timezone.utc)
+    return datetime(1970, 1, 1, tzinfo=UTC)
 
 
 def inspect_certificate(
@@ -160,8 +165,8 @@ def inspect_certificate(
             not_before = cert.not_valid_before_utc
             not_after = cert.not_valid_after_utc
         except AttributeError:  # cryptography < 42
-            not_before = cert.not_valid_before.replace(tzinfo=timezone.utc)
-            not_after = cert.not_valid_after.replace(tzinfo=timezone.utc)
+            not_before = cert.not_valid_before.replace(tzinfo=UTC)
+            not_after = cert.not_valid_after.replace(tzinfo=UTC)
 
         san: list[str] = []
         try:
@@ -262,9 +267,9 @@ def is_weak_cipher(suite: str | None) -> bool:
 
 
 def days_until(not_after: datetime, *, now: datetime | None = None) -> int:
-    now = now or datetime.now(timezone.utc)
+    now = now or datetime.now(UTC)
     if not_after.tzinfo is None:
-        not_after = not_after.replace(tzinfo=timezone.utc)
+        not_after = not_after.replace(tzinfo=UTC)
     return (not_after - now).days
 
 

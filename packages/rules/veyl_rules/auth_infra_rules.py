@@ -12,8 +12,6 @@ reflects that distinction.
 
 from __future__ import annotations
 
-import json
-
 from veyl_api.enums import Confidence, RuleCategory, Severity
 from veyl_rules.framework import RuleContext, RuleDefinition, RuleMatch
 
