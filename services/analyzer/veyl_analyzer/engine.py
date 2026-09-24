@@ -24,7 +24,10 @@ from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+from veyl_rules import RuleContext, RuleMatch, evaluate, get_rule
+from veyl_rules.framework import RuleDefinition
 
+from veyl_analyzer.risk import RiskAssessment, assess_risk
 from veyl_api.db.base import utcnow
 from veyl_api.enums import (
     ACTIVE_FINDING_STATUSES,
@@ -42,9 +45,6 @@ from veyl_api.models import (
     Scan,
 )
 from veyl_api.security.sanitize import checksum, truncate
-from veyl_rules import RuleContext, RuleMatch, evaluate
-from veyl_rules.framework import RuleDefinition
-from veyl_analyzer.risk import RiskAssessment, assess_risk
 
 
 @dataclass
@@ -331,7 +331,11 @@ def analyze_scan(
                 data_classification=asset.data_classification,
                 environment=asset.environment,
                 internet_exposed=asset.internet_exposed,
-                context_source=(contexts.get(asset_id).context_source if contexts.get(asset_id) else Provenance.INFERRED),
+                context_source=(
+                    contexts.get(asset_id).context_source
+                    if contexts.get(asset_id)
+                    else Provenance.INFERRED
+                ),
                 open_port_count=open_port_count,
             )
 
@@ -508,3 +512,96 @@ def _resolve_absent_findings(
 
     session.flush()
     return resolved
+
+
+def rescore_findings(
+    session: Session,
+    *,
+    organization_id: str,
+    asset_ids: list[str] | None = None,
+) -> int:
+    """Recompute risk scores for active findings against current business context.
+
+    The risk model depends on business criticality, data classification and
+    environment. Those are entered by humans and routinely arrive *after* the
+    first scan. Without this function a finding would keep the score it was
+    given when Veyl still believed the asset was an unclassified development
+    host, and the business prioritisation — the entire point of the product —
+    would be wrong.
+
+    Only the score, its factors and its explanation are recomputed. The
+    severity, the evidence and the finding's identity are untouched, because
+    re-deriving those from a scan that is not running would mean inventing
+    observations.
+    """
+    stmt = select(Finding).where(
+        Finding.organization_id == organization_id,
+        Finding.status.in_([s.value for s in ACTIVE_FINDING_STATUSES]),
+    )
+    if asset_ids:
+        stmt = stmt.where(Finding.asset_id.in_(asset_ids))
+
+    findings = list(session.execute(stmt).scalars())
+    if not findings:
+        return 0
+
+    assets = {
+        asset.id: asset
+        for asset in session.execute(
+            select(Asset).where(
+                Asset.organization_id == organization_id,
+                Asset.id.in_({f.asset_id for f in findings}),
+            )
+        ).scalars()
+    }
+
+    rescored = 0
+    for finding in findings:
+        asset = assets.get(finding.asset_id)
+        if asset is None:
+            continue
+        rule = get_rule(finding.rule_id)
+        if rule is None:
+            # The rule no longer ships. Leaving the stored score is correct:
+            # recomputing it against a model that no longer has this rule would
+            # silently change a number nobody can now reproduce.
+            continue
+
+        # Reconstruct the decision inputs the first pass recorded, so the score
+        # reflects the same detection, only re-weighted by new business context.
+        preserved = RuleMatch(
+            subject_suffix="",
+            summary=finding.description or "",
+            severity=finding.severity,
+            confidence=finding.confidence,
+            risk_factors={
+                key: value
+                for key, value in (finding.risk_factors or {}).items()
+                # Recompute only the context-dependent factors; the service
+                # class is a property of the detection and must be preserved.
+                if key == "service_class"
+            },
+        )
+
+        assessment = assess_risk(
+            rule=rule,
+            match=preserved,
+            asset=asset,
+            business_criticality=asset.business_criticality,
+            data_classification=asset.data_classification,
+            environment=asset.environment,
+            internet_exposed=asset.internet_exposed,
+            context_source=asset.context_source,
+        )
+        if (
+            assessment.score != finding.risk_score
+            or assessment.explanation != finding.risk_explanation
+        ):
+            finding.risk_score = assessment.score
+            finding.risk_factors = assessment.factors
+            finding.risk_explanation = assessment.explanation
+            finding.criticality_boost = assessment.criticality_boost
+            rescored += 1
+
+    session.flush()
+    return rescored

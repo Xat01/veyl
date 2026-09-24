@@ -36,11 +36,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from veyl_rules.framework import RuleDefinition, RuleMatch
+
 from veyl_api.enums import (
-    CONFIDENCE_ORDER,
-    CRITICALITY_ORDER,
-    DATA_CLASSIFICATION_ORDER,
-    SEVERITY_ORDER,
     BusinessCriticality,
     Confidence,
     DataClassification,
@@ -49,7 +47,6 @@ from veyl_api.enums import (
     Severity,
 )
 from veyl_api.models import Asset
-from veyl_rules.framework import RuleDefinition, RuleMatch
 
 MAX_SCORE = 100.0
 
