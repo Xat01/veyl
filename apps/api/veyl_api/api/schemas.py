@@ -75,6 +75,19 @@ class LoginRequest(APIModel):
         max_length=100,
         description="Required only when the user belongs to more than one organization.",
     )
+    totp_code: str | None = Field(
+        default=None,
+        max_length=16,
+        description=(
+            "Second-factor code. Required when the account has a factor enrolled. "
+            "Omit on the first attempt to receive a challenge response."
+        ),
+    )
+    recovery_code: str | None = Field(
+        default=None,
+        max_length=32,
+        description="Alternative to totp_code. Single-use; consumed on success.",
+    )
 
 
 class TokenResponse(APIModel):
@@ -681,3 +694,148 @@ class HealthOut(APIModel):
     env: str
     database: str
     checks: dict[str, bool] = Field(default_factory=dict)
+
+
+# ---------------------------------------------------------------------------
+# Second factors and session hardening (§27)
+# ---------------------------------------------------------------------------
+
+
+class MFARequiredResponse(APIModel):
+    """Returned instead of tokens when the password was correct but a factor is due.
+
+    The distinction this preserves is important: it tells the *client* to ask
+    for a code, without telling an *attacker* whether the password was right.
+    Veyl only returns this after the password verified, so it does reveal that
+    much — which is unavoidable, since the client must know to prompt — and the
+    response is identical whether or not the account has a factor enrolled.
+    """
+
+    mfa_required: Literal[True] = True
+    methods: list[str] = Field(
+        description="Factors this account can present, in the order the client should offer."
+    )
+    detail: str = "a second factor is required to finish signing in"
+
+
+class TOTPEnrolmentOut(APIModel):
+    """The one-time disclosure of a new TOTP secret.
+
+    The secret is returned here and never again. If the user loses it before
+    scanning, the enrolment must be repeated, because Veyl stores only a hash.
+    """
+
+    secret: str = Field(description="Base32 shared secret. Shown once.")
+    provisioning_uri: str = Field(description="otpauth:// URI for an authenticator app.")
+    recovery_codes: list[str] = Field(
+        description="Single-use codes. Shown once; only their set hash is stored."
+    )
+
+
+class TOTPConfirmRequest(APIModel):
+    code: str = Field(min_length=6, max_length=16)
+
+
+class TOTPConfirmOut(APIModel):
+    mfa_enabled: bool
+    detail: str
+
+
+class MFADisableRequest(APIModel):
+    password: str = Field(
+        min_length=1,
+        max_length=256,
+        description="Required so a stolen session token cannot remove a factor.",
+    )
+    code: str | None = Field(default=None, max_length=32)
+
+
+class WebAuthnRegistrationOptionsOut(APIModel):
+    """Public-key credential creation options, ready for ``navigator.credentials.create``."""
+
+    challenge: str
+    rp_id: str
+    rp_name: str
+    user_id: str
+    user_name: str
+    user_display_name: str
+    timeout: int
+    attestation: str = "none"
+    authenticator_attachment: str | None = None
+    algorithms: list[int] = Field(
+        description="COSE algorithm identifiers this server can verify."
+    )
+
+
+class WebAuthnRegistrationRequest(APIModel):
+    """A ``navigator.credentials.create()`` result.
+
+    The ``*_json`` and ``*_object`` fields are deliberately not length-validated
+    here. The verifier decodes and checks each one — origin, challenge, RP id,
+    signature — and reports *which* check failed. A schema-level minimum would
+    reject a short-but-well-formed payload with an opaque 422 before the real
+    reason could be given, which is exactly the kind of message that makes a
+    security control hard to operate.
+    """
+
+    credential_id: str = Field(min_length=1, max_length=1024)
+    client_data_json: str = Field(min_length=1)
+    attestation_object: str = Field(min_length=1)
+    label: str = Field(default="Security key", max_length=120)
+    transports: list[str] | None = None
+
+
+class WebAuthnAuthenticationOptionsOut(APIModel):
+    challenge: str
+    rp_id: str
+    timeout: int
+    allow_credentials: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class WebAuthnAuthenticationRequest(APIModel):
+    credential_id: str = Field(min_length=1, max_length=1024)
+    client_data_json: str = Field(min_length=1)
+    authenticator_data: str = Field(min_length=1)
+    signature: str = Field(min_length=1)
+
+
+class CredentialOut(APIModel):
+    id: str
+    credential_id_prefix: str = Field(
+        description="First 12 characters only. The full identifier is not published."
+    )
+    label: str
+    algorithm: str
+    curve: str | None
+    is_active: bool
+    created_at: datetime
+    last_used_at: datetime | None
+
+
+class SecurityPostureOut(APIModel):
+    """What this account has enrolled, and what the policy therefore permits.
+
+    Exposed so an administrator can see *why* an account cannot hold a
+    privileged role instead of being told only that it cannot.
+    """
+
+    mfa_enabled: bool
+    has_hardware_key: bool
+    has_totp: bool
+    recovery_codes_issued: bool
+    credentials: list[CredentialOut] = Field(default_factory=list)
+    privileged_roles: list[str] = Field(
+        description="Roles the account holds that require a second factor."
+    )
+    meets_privileged_policy: bool = Field(
+        description="True when every privileged role this account holds is backed by a factor."
+    )
+    failed_login_count: int
+    locked_until: datetime | None
+    lockout_threshold: int
+    lockout_window_minutes: int
+    session_ttl_minutes: int
+    recommendations: list[str] = Field(
+        default_factory=list,
+        description="Concrete steps to reach the policy, or to exceed it.",
+    )

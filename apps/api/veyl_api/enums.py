@@ -401,3 +401,18 @@ class AuditAction(StrEnum):
     ATTACK_PATHS_RECOMPUTED = "ATTACK_PATHS_RECOMPUTED"
     REPORT_GENERATED = "REPORT_GENERATED"
     RULE_EVALUATED = "RULE_EVALUATED"
+
+    # -- Authentication hardening (§27) -------------------------------------
+    # Each of these is a security-relevant event about the account itself, so
+    # every one of them is recorded in the tamper-evident chain.
+    ACCOUNT_LOCKED = "ACCOUNT_LOCKED"
+    ACCOUNT_UNLOCKED = "ACCOUNT_UNLOCKED"
+    MFA_ENROLLED = "MFA_ENROLLED"
+    MFA_DISABLED = "MFA_DISABLED"
+    MFA_VERIFIED = "MFA_VERIFIED"
+    MFA_FAILED = "MFA_FAILED"
+    MFA_RECOVERY_USED = "MFA_RECOVERY_USED"
+    WEBAUTHN_REGISTERED = "WEBAUTHN_REGISTERED"
+    WEBAUTHN_REMOVED = "WEBAUTHN_REMOVED"
+    WEBAUTHN_FAILED = "WEBAUTHN_FAILED"
+    SESSION_REVOKED = "SESSION_REVOKED"

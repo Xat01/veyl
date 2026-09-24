@@ -18,9 +18,17 @@ from veyl_api.api.schemas import MemberCreate, MemberSummary, MemberUpdate, Page
 from veyl_api.audit import AuditRecord, write_audit
 from veyl_api.enums import AuditAction, OrganizationRole
 from veyl_api.models import OrganizationMember, User
+from veyl_api.security import mfa as mfa_service
 from veyl_api.security.auth import hash_password
 
 router = APIRouter()
+
+#: Roles that §27 refuses to grant without a second factor on the account.
+#: Imported from the security module rather than redefined so there is exactly
+#: one list, and adding a role to the policy cannot leave a gap here.
+_PRIVILEGED_ROLES = frozenset(
+    OrganizationRole(name) for name in mfa_service.PRIVILEGED_ROLES
+)
 
 
 def _summary(session: DbSession, membership: OrganizationMember) -> MemberSummary:
@@ -104,6 +112,21 @@ def create_member(
     elif not user.full_name and payload.full_name:
         # A user created by an earlier flow may predate the name requirement.
         user.full_name = payload.full_name
+
+    # §27: a privileged role may not be granted to an account that has no second
+    # factor. Enforced here as well as at login, because enforcement only at
+    # login would leave an account holding ADMIN that can never sign in — a trap
+    # for the user rather than a control.
+    if payload.role in _PRIVILEGED_ROLES and not mfa_service.has_second_factor(user):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"{email} cannot be granted the {payload.role.value} role yet: an "
+                "administrative account must have a second factor enrolled first. Ask them "
+                "to enrol one at /api/auth/mfa/totp/enrol or to register a hardware key, "
+                "then grant the role."
+            ),
+        )
 
     existing = session.execute(
         select(OrganizationMember).where(
@@ -212,6 +235,19 @@ def update_member(
 
     changes: list[str] = []
     if payload.role is not None and payload.role != membership.role:
+        # §27: promoting into a privileged role requires the account to already
+        # have a second factor. Granting first and enrolling later would create a
+        # window in which admin capability exists with only a password behind it.
+        if payload.role in _PRIVILEGED_ROLES:
+            target_user = session.get(User, membership.user_id)
+            if target_user is None or not mfa_service.has_second_factor(target_user):
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=(
+                        f"this account cannot be promoted to {payload.role.value} until it "
+                        "has a second factor enrolled; ask the member to enrol one first"
+                    ),
+                )
         changes.append(f"role {membership.role.value} -> {payload.role.value}")
         membership.role = payload.role
     if payload.is_active is not None and payload.is_active != membership.is_active:

@@ -37,6 +37,7 @@ from veyl_api.db.base import (
     Timestamped,
     UTCDateTime,
     UUIDPrimaryKey,
+    utcnow,
 )
 from veyl_api.enums import (
     AssetOwner,
@@ -95,7 +96,27 @@ class User(UUIDPrimaryKey, Timestamped, Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     last_login_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
 
+    # -- Second factor ------------------------------------------------------
+    # Enrolling a factor is what makes an account eligible for the ADMIN role
+    # (see ``veyl_api.security.mfa``). The secret is stored only as a hash, so a
+    # database disclosure does not hand over working second factors — the same
+    # argument that applies to passwords applies here.
+    mfa_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    mfa_secret_hash: Mapped[str | None] = mapped_column(String(255))
+    mfa_enrolled_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    mfa_recovery_hash: Mapped[str | None] = mapped_column(String(255))
+
+    # -- Lockout ------------------------------------------------------------
+    # Counted here rather than in memory so a restart cannot be used to clear a
+    # lockout, and so several API processes share one counter.
+    failed_login_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    locked_until: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    last_failed_login_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+
     memberships: Mapped[list[OrganizationMember]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
+    webauthn_credentials: Mapped[list[WebAuthnCredential]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
     )
 
@@ -949,3 +970,68 @@ class AuditLog(UUIDPrimaryKey, OrgScoped, Base):
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False, index=True)
     prev_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     entry_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+
+
+# =============================================================================
+# Authentication hardening (§27)
+# =============================================================================
+
+
+class WebAuthnCredential(UUIDPrimaryKey, Timestamped, Base):
+    """A registered hardware authenticator or platform passkey.
+
+    ``credential_id`` is unique across the whole table, not per user: the
+    authenticator itself guarantees it is globally unique, and enforcing that
+    here means a credential registered to one account can never be presented as
+    another account's factor.
+
+    ``public_key`` is the COSE key the authenticator generated. Veyl stores only
+    the public half, so compromising this table does not allow an attacker to
+    authenticate — they would additionally need the private key, which never
+    leaves the hardware.
+    """
+
+    __tablename__ = "webauthn_credentials"
+    __table_args__ = (
+        UniqueConstraint("credential_id", name="uq_webauthn_credential_id"),
+        Index("ix_webauthn_user", "user_id"),
+    )
+
+    user_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    credential_id: Mapped[str] = mapped_column(String(512), nullable=False)
+    public_key: Mapped[str] = mapped_column(Text, nullable=False)
+    #: The COSE algorithm the key was registered with, stored because the
+    #: signature must be verified with the algorithm the key actually uses
+    #: rather than a default chosen at verification time.
+    algorithm: Mapped[str] = mapped_column(String(16), nullable=False, default="ES256")
+    curve: Mapped[str | None] = mapped_column(String(24))
+    sign_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    transports: Mapped[str | None] = mapped_column(String(200))
+    aaguid: Mapped[str | None] = mapped_column(String(64))
+    label: Mapped[str] = mapped_column(String(120), default="Security key", nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    last_used_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+
+    user: Mapped[User] = relationship(back_populates="webauthn_credentials")
+
+
+class AuthChallenge(UUIDPrimaryKey, Base):
+    """A short-lived WebAuthn challenge.
+
+    A challenge must be unpredictable, single-use, and expire quickly. Storing
+    it server-side rather than accepting it from the client is what prevents a
+    replay: after one use the row is consumed, and a challenge older than its
+    TTL is refused regardless of whether it was ever used.
+    """
+
+    __tablename__ = "auth_challenges"
+    __table_args__ = (Index("ix_challenge_expires", "expires_at"),)
+
+    user_id: Mapped[str | None] = mapped_column(String(36))
+    challenge: Mapped[str] = mapped_column(String(128), nullable=False, unique=True)
+    purpose: Mapped[str] = mapped_column(String(32), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False)
+    consumed_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, nullable=False)
