@@ -1,0 +1,133 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Cancel a run in progress when the same branch is pushed again. A superseded
+# run tells nobody anything, and CI minutes are not free.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Ruff
+        run: ruff check .
+
+  test:
+    name: Test (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Run the test suite
+        env:
+          # The suite creates its own temporary SQLite databases. These values
+          # exist so a test that reads the environment cannot pick up a
+          # developer's local .env, which would make a failure unreproducible.
+          VEYL_ENV: test
+          VEYL_SECRET_KEY: ci-only-secret-key-not-used-outside-this-workflow
+          VEYL_ALLOW_PRIVATE_TARGETS: "false"
+        run: python -m pytest -q --tb=short -rfE
+
+  security-properties:
+    name: Security properties
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      # These four suites are the product's claims. They run as their own job so
+      # a regression in one is unmistakable in the checks list rather than being
+      # a line in a longer log.
+      - name: SSRF floor, scope enforcement, audit chain, evidence contract
+        env:
+          VEYL_ENV: test
+          VEYL_SECRET_KEY: ci-only-secret-key-not-used-outside-this-workflow
+        run: python -m pytest tests/security -v --tb=short
+
+  config-guard:
+    name: Production config guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      # The settings model is supposed to refuse to construct in production with
+      # a weak secret or with private targets enabled. Asserting the refusal here
+      # means a deployment cannot be made insecure by a future edit that removes
+      # the check, because CI fails first.
+      - name: Assert the settings model refuses insecure production config
+        run: |
+          python - <<'PY'
+          from veyl_api.config import Settings
+
+          def must_refuse(**kwargs):
+              try:
+                  Settings(**kwargs)
+              except Exception:
+                  return
+              raise SystemExit(f"settings accepted an insecure production config: {kwargs}")
+
+          must_refuse(env="production",
+                      secret_key="dev-insecure-secret-key-do-not-use-in-production")
+          must_refuse(env="production", secret_key="short")
+          must_refuse(env="production", secret_key="x" * 48, allow_private_targets=True)
+
+          Settings(env="production", secret_key="x" * 48)
+          print("production config guard holds")
+          PY

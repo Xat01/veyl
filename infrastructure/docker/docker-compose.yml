@@ -1,0 +1,62 @@
+# Veyl — API + Postgres.
+#
+# NOTE: never executed. Docker is not available in the environment this project
+# was developed in. See docs/DEPLOYMENT.md before relying on this.
+#
+#   export VEYL_SECRET_KEY="$(python -c 'import secrets; print(secrets.token_urlsafe(64))')"
+#   docker compose -f infrastructure/docker/docker-compose.yml up --build
+#
+# VEYL_SECRET_KEY is required and deliberately has no default. The image runs
+# with VEYL_ENV=production, and the settings model refuses to construct with a
+# weak or default secret, so a container started without it exits with a clear
+# error instead of running with a key nobody chose. That is the intended
+# behaviour, not a bug in the compose file.
+
+name: veyl
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: veyl
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: veyl
+    volumes:
+      - veyl-db:/var/lib/postgresql/data
+    # Not published to the host. The API reaches it over the compose network,
+    # and nothing else needs to. Uncomment only for local inspection.
+    # ports:
+    #   - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U veyl -d veyl"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  api:
+    build:
+      context: ../..
+      dockerfile: infrastructure/docker/Dockerfile
+    environment:
+      VEYL_ENV: production
+      VEYL_SECRET_KEY: ${VEYL_SECRET_KEY:?set VEYL_SECRET_KEY to a strong random value}
+      VEYL_DATABASE_URL: postgresql+psycopg://veyl:${POSTGRES_PASSWORD}@db:5432/veyl
+      VEYL_ARTIFACT_DIR: /app/artifacts
+      # Left unset on purpose. VEYL_ALLOW_PRIVATE_TARGETS lifts the SSRF floor
+      # for RFC1918 and loopback addresses; enabling it in a deployment defeats
+      # the control that stops Veyl reaching internal services and the cloud
+      # metadata endpoint. The settings model also refuses it in production.
+      VEYL_CORS_ORIGINS: ${VEYL_CORS_ORIGINS:-http://localhost:3000}
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - veyl-artifacts:/app/artifacts
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  veyl-db:
+  veyl-artifacts:
