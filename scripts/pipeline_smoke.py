@@ -36,7 +36,7 @@ from veyl_correlation.attack_paths import correlate_attack_paths  # noqa: E402
 from veyl_correlation.graph import rebuild_graph  # noqa: E402
 from veyl_scanner.runner import ScanRunner  # noqa: E402
 
-from veyl_api.db.base import Base, utcnow  # noqa: E402
+from veyl_api.db.base import utcnow  # noqa: E402
 from veyl_api.db.session import SessionLocal, engine  # noqa: E402
 from veyl_api.enums import (  # noqa: E402
     AssetOwner,
@@ -104,8 +104,10 @@ def main(argv: list[str] | None = None) -> int:
     # which is also closer to how an operator would really do it.
     restrict_to_demo_port = not args.external
 
-    Base.metadata.drop_all(engine)
-    Base.metadata.create_all(engine)
+    from veyl_api.db.base import create_all, drop_all
+
+    drop_all(engine)
+    create_all(engine)
 
     session = SessionLocal()
     try:

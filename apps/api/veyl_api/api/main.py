@@ -43,7 +43,6 @@ from veyl_api.api.routes import (
     rules,
 )
 from veyl_api.config import settings
-from veyl_api.db.base import Base
 
 logger = logging.getLogger("veyl.api")
 
@@ -140,10 +139,11 @@ async def lifespan(app: FastAPI):
     changes to existing tables, which is exactly the class of drift a migration
     system exists to prevent.
     """
-    from veyl_api.db.session import engine
+    from veyl_api.db.base import create_all as _create_all
+    from veyl_api.db.session import get_engine
 
     if settings.is_sqlite:
-        Base.metadata.create_all(engine)
+        _create_all(get_engine())
         logger.info("sqlite schema ensured at %s", settings.database_url)
     yield
 

@@ -139,3 +139,33 @@ class OrgScoped:
     """
 
     organization_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+
+
+def load_all_models() -> None:
+    """Import every model module so its tables register on ``Base.metadata``.
+
+    SQLAlchemy only knows about a table once the class defining it has been
+    imported. That makes ``Base.metadata.create_all()`` silently create nothing
+    if it runs before any model is imported — no error, just an empty database
+    and a confusing "no such table" much later. Rather than depend on incidental
+    import order, every component that creates or migrates a schema calls this
+    first.
+
+    Idempotent: importing an already-imported module is a no-op.
+    """
+    importlib.import_module("veyl_api.models")
+
+
+def create_all(engine) -> None:  # noqa: ANN001
+    """Create any missing tables for the configured models on ``engine``.
+
+    Prefer this over calling ``Base.metadata.create_all`` directly.
+    """
+    load_all_models()
+    Base.metadata.create_all(engine)
+
+
+def drop_all(engine) -> None:  # noqa: ANN001
+    """Drop every table for the configured models on ``engine``."""
+    load_all_models()
+    Base.metadata.drop_all(engine)

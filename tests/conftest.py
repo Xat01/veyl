@@ -43,27 +43,34 @@ os.environ.setdefault("VEYL_ALLOW_PRIVATE_TARGETS", "true")
 
 @pytest.fixture()
 def session(tmp_path, monkeypatch):
-    """A fresh in-memory-equivalent SQLite database for one test."""
+    """A fresh SQLite file per test, so no test can observe another's rows.
+
+    Settings are memoised and the engine is cached against the URL it was built
+    for, so both have to be reset here rather than imported once at module
+    scope. ``dispose_engine`` actually closes the pooled connections; without
+    it the next test's engine change would leave the previous file handle open
+    and the drop_all below would fail on Windows.
+    """
     db_path = tmp_path / f"veyl-test-{uuid.uuid4().hex}.db"
     monkeypatch.setenv("VEYL_DATABASE_URL", f"sqlite:///{db_path.as_posix()}")
 
-    # The session module builds its engine at import time, so rebuild it
-    # against the per-test URL rather than sharing a global engine.
-    import importlib
-
+    from veyl_api.config import reset_settings_cache
     from veyl_api.db import session as session_module
+    from veyl_api.db.base import create_all, drop_all
 
-    importlib.reload(session_module)
-    from veyl_api.db.base import Base
+    reset_settings_cache()
+    session_module.dispose_engine()
 
-    Base.metadata.create_all(session_module.engine)
-    db = session_module.SessionLocal()
+    engine = session_module.get_engine()
+    create_all(engine)
+    db = session_module.get_sessionmaker()()
     try:
         yield db
     finally:
         db.close()
-        Base.metadata.drop_all(session_module.engine)
-        session_module.engine.dispose()
+        drop_all(engine)
+        session_module.dispose_engine()
+        reset_settings_cache()
 
 
 @pytest.fixture()

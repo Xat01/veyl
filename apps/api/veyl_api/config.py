@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import ipaddress
 import re
+from contextlib import contextmanager
 from functools import lru_cache
 from typing import Literal
 
@@ -166,10 +167,106 @@ def _build_metadata_addresses() -> tuple[ipaddress.IPv4Address | ipaddress.IPv6A
 METADATA_ADDRESSES = _build_metadata_addresses()
 
 
+#: Stack of active :func:`overridden_settings` replacements. The innermost one
+#: wins, so nested overrides compose the way a reader would expect.
+_settings_overrides: list[Settings] = []
+
+
 @lru_cache(maxsize=1)
-def get_settings() -> Settings:
-    """Return the process-wide settings singleton."""
+def _build_settings() -> Settings:
+    """Construct settings from the environment. Memoised by ``get_settings``."""
     return Settings()
 
 
-settings = get_settings()
+def get_settings() -> Settings:
+    """Return the settings in force right now.
+
+    Resolves through the override stack first, then falls back to the
+    environment-derived singleton. This is the only supported way to read
+    configuration, which is what keeps ``reset_settings_cache`` and
+    ``overridden_settings`` effective for every caller.
+    """
+    if _settings_overrides:
+        return _settings_overrides[-1]
+    return _build_settings()
+
+
+def reset_settings_cache() -> None:
+    """Drop the cached settings so the next call re-reads the environment.
+
+    Needed by tests, which point the process at a scratch database per test,
+    and by any tooling that reconfigures the process after import.
+    """
+    _build_settings.cache_clear()
+
+
+class _SettingsProxy:
+    """A stand-in for the settings singleton that always resolves the current one.
+
+    ``veyl_api.config.settings`` is imported by name in a dozen modules. Binding
+    the real object there would freeze the configuration at import time: any
+    later change to the environment would be visible to ``get_settings()`` but
+    invisible to every module that had already imported the old object, which is
+    a genuinely confusing failure ("the engine points at one database and the
+    scanner uses another"). This proxy keeps every existing import working while
+    always deferring to the live settings.
+
+    Assignment is refused on purpose. A module that could write to ``settings``
+    could silently change the safety posture of the whole process at any moment,
+    which is exactly the kind of invisible state change this codebase avoids.
+    Use :func:`overridden_settings` when a temporary change is genuinely needed.
+    """
+
+    __slots__ = ()
+
+    def __getattr__(self, name: str):
+        return getattr(get_settings(), name)
+
+    def __setattr__(self, name: str, value) -> None:
+        raise AttributeError(
+            "settings is read-only; use veyl_api.config.overridden_settings(...) "
+            "for a temporary change, or set the corresponding VEYL_* environment "
+            "variable before the process starts"
+        )
+
+    def __repr__(self) -> str:
+        return f"<settings proxy -> {get_settings()!r}>"
+
+
+@contextmanager
+def overridden_settings(**overrides: object):
+    """Temporarily replace settings values for the duration of the block.
+
+    Exists so tests (and tooling that must simulate a different deployment) can
+    exercise a posture such as ``env="production"`` without leaking the change
+    past the block or mutating a process-wide object in place.
+
+    The previous settings object is restored on exit, including when the block
+    raises, so an exception cannot leave the process configured for a different
+    environment than it started in.
+
+    Yields:
+        The overridden settings instance.
+
+    Raises:
+        ValueError: if an override names a field that does not exist, so a typo
+            fails loudly instead of being silently ignored.
+
+    Example::
+
+        with overridden_settings(env="production", allow_private_targets=False):
+            ...
+    """
+    unknown = sorted(set(overrides) - set(Settings.model_fields))
+    if unknown:
+        raise ValueError(f"unknown settings field(s): {', '.join(unknown)}")
+
+    replacement = get_settings().model_copy(update=overrides)
+    _settings_overrides.append(replacement)
+    try:
+        yield replacement
+    finally:
+        _settings_overrides.pop()
+
+
+settings: Settings = _SettingsProxy()  # type: ignore[assignment]
