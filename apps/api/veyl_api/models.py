@@ -410,8 +410,12 @@ class Scan(UUIDPrimaryKey, Timestamped, OrgScoped, Base):
     observations: Mapped[list[Observation]] = relationship(
         back_populates="scan", cascade="all, delete-orphan"
     )
+    # `exposure_changes` has two FK paths to `scans` (scan_id, previous_scan_id),
+    # so the join must name the owning column explicitly.
     changes: Mapped[list[ExposureChange]] = relationship(
-        back_populates="scan", cascade="all, delete-orphan"
+        back_populates="scan",
+        cascade="all, delete-orphan",
+        foreign_keys="ExposureChange.scan_id",
     )
 
 
@@ -740,7 +744,9 @@ class ExposureChange(UUIDPrimaryKey, Timestamped, OrgScoped, Base):
 
     detected_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False)
 
-    scan: Mapped[Scan] = relationship(back_populates="changes")
+    scan: Mapped[Scan] = relationship(
+        back_populates="changes", foreign_keys=[scan_id]
+    )
 
 
 # =============================================================================
