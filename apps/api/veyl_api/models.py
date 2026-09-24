@@ -18,19 +18,26 @@ from datetime import datetime
 from typing import Any
 
 from sqlalchemy import (
+    JSON,
     Boolean,
     Float,
     ForeignKey,
     Index,
     Integer,
-    JSON,
     String,
     Text,
     UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from veyl_api.db.base import Base, OrgScoped, Timestamped, UTCDateTime, UUIDPrimaryKey
+from veyl_api.db.base import (
+    Base,
+    EnumType,
+    OrgScoped,
+    Timestamped,
+    UTCDateTime,
+    UUIDPrimaryKey,
+)
 from veyl_api.enums import (
     AssetOwner,
     AssetStatus,
@@ -55,9 +62,7 @@ from veyl_api.enums import (
     ScanStatus,
     ScanTrigger,
     Severity,
-    VulnerabilityStatus,
 )
-
 
 # =============================================================================
 # Tenancy and identity
@@ -110,7 +115,10 @@ class OrganizationMember(UUIDPrimaryKey, Timestamped, Base):
     user_id: Mapped[str] = mapped_column(
         String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    role: Mapped[OrganizationRole] = mapped_column(String(32), nullable=False)
+    role: Mapped[OrganizationRole] = mapped_column(
+        EnumType("veyl_api.enums:OrganizationRole",
+        length=32), nullable=False,
+    )
     title: Mapped[str | None] = mapped_column(String(120))
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
@@ -140,13 +148,15 @@ class ScopeEntry(UUIDPrimaryKey, Timestamped, OrgScoped, Base):
     domain: Mapped[str] = mapped_column(String(255), nullable=False)
     cidr: Mapped[str | None] = mapped_column(String(64))
     environment: Mapped[Environment] = mapped_column(
-        String(32), default=Environment.UNKNOWN, nullable=False
+        EnumType("veyl_api.enums:Environment", length=32), default=Environment.UNKNOWN, nullable=False
     )
     asset_owner: Mapped[AssetOwner] = mapped_column(
-        String(32), default=AssetOwner.UNASSIGNED, nullable=False
+        EnumType("veyl_api.enums:AssetOwner", length=32), default=AssetOwner.UNASSIGNED, nullable=False
     )
     authorization_status: Mapped[AuthorizationStatus] = mapped_column(
-        String(32), default=AuthorizationStatus.PENDING, nullable=False
+        EnumType("veyl_api.enums:AuthorizationStatus", length=32),
+        default=AuthorizationStatus.PENDING,
+        nullable=False,
     )
     authorized_by: Mapped[str | None] = mapped_column(String(200))
     authorized_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
@@ -183,6 +193,7 @@ class Asset(UUIDPrimaryKey, Timestamped, OrgScoped, Base):
         Index("ix_asset_org_type", "organization_id", "asset_type"),
         Index("ix_asset_org_status", "organization_id", "status"),
         Index("ix_asset_org_exposed", "organization_id", "internet_exposed"),
+        Index("ix_asset_org_reachable", "organization_id", "reachable"),
     )
 
     #: Stable natural key within the tenant, e.g. "api.acmepay.example" or "203.0.113.10".
@@ -190,22 +201,40 @@ class Asset(UUIDPrimaryKey, Timestamped, OrgScoped, Base):
     hostname: Mapped[str | None] = mapped_column(String(255), index=True)
     ip_address: Mapped[str | None] = mapped_column(String(64), index=True)
     domain: Mapped[str | None] = mapped_column(String(255))
-    asset_type: Mapped[AssetType] = mapped_column(String(32), nullable=False)
+    asset_type: Mapped[AssetType] = mapped_column(
+        EnumType("veyl_api.enums:AssetType",
+        length=32), nullable=False,
+    )
     environment: Mapped[Environment] = mapped_column(
-        String(32), default=Environment.UNKNOWN, nullable=False
+        EnumType("veyl_api.enums:Environment", length=32), default=Environment.UNKNOWN, nullable=False
     )
     status: Mapped[AssetStatus] = mapped_column(
-        String(32), default=AssetStatus.ACTIVE, nullable=False
+        EnumType("veyl_api.enums:AssetStatus", length=32), default=AssetStatus.ACTIVE, nullable=False
     )
+
+    #: Whether the asset is reachable *from the position Veyl scanned from*.
+    #: This is an observed fact: the port sweep either connected or it did not.
+    reachable: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
+    #: Whether the asset faces the public internet. This is a claim about the
+    #: asset's network position that a scanner cannot establish by connecting to
+    #: it, so it is never set from scan results. It is only set from the
+    #: organization's own asset context or scope metadata, and it defaults to
+    #: False (unknown/not established) rather than being inferred from
+    #: reachability. Conflating the two would let Veyl describe an internal host
+    #: as "internet-exposed" purely because a scan reached it.
     internet_exposed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
     authorization_status: Mapped[AuthorizationStatus] = mapped_column(
-        String(32), default=AuthorizationStatus.PENDING, nullable=False
+        EnumType("veyl_api.enums:AuthorizationStatus", length=32),
+        default=AuthorizationStatus.PENDING,
+        nullable=False,
     )
 
     # Provenance of the *existence* of this asset.
     discovery_source: Mapped[str] = mapped_column(String(64), default="scope_scan", nullable=False)
     source_provenance: Mapped[Provenance] = mapped_column(
-        String(32), default=Provenance.OBSERVED, nullable=False
+        EnumType("veyl_api.enums:Provenance", length=32), default=Provenance.OBSERVED, nullable=False
     )
 
     first_seen: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False)
@@ -217,19 +246,19 @@ class Asset(UUIDPrimaryKey, Timestamped, OrgScoped, Base):
     # Denormalised business context for fast list rendering. The authoritative
     # record is AssetContext, which carries per-field provenance.
     business_criticality: Mapped[BusinessCriticality] = mapped_column(
-        String(32), default=BusinessCriticality.LOW, nullable=False
+        EnumType("veyl_api.enums:BusinessCriticality", length=32), default=BusinessCriticality.LOW, nullable=False
     )
     data_classification: Mapped[DataClassification] = mapped_column(
-        String(32), default=DataClassification.PUBLIC, nullable=False
+        EnumType("veyl_api.enums:DataClassification", length=32), default=DataClassification.PUBLIC, nullable=False
     )
     business_function: Mapped[BusinessFunction] = mapped_column(
-        String(32), default=BusinessFunction.OTHER, nullable=False
+        EnumType("veyl_api.enums:BusinessFunction", length=32), default=BusinessFunction.OTHER, nullable=False
     )
     owner: Mapped[AssetOwner] = mapped_column(
-        String(32), default=AssetOwner.UNASSIGNED, nullable=False
+        EnumType("veyl_api.enums:AssetOwner", length=32), default=AssetOwner.UNASSIGNED, nullable=False
     )
     context_source: Mapped[Provenance] = mapped_column(
-        String(32), default=Provenance.INFERRED, nullable=False
+        EnumType("veyl_api.enums:Provenance", length=32), default=Provenance.INFERRED, nullable=False
     )
 
     scope_entry: Mapped[ScopeEntry | None] = relationship(back_populates="assets")
@@ -261,24 +290,24 @@ class AssetContext(UUIDPrimaryKey, Timestamped, OrgScoped, Base):
         String(36), ForeignKey("assets.id", ondelete="CASCADE"), nullable=False, unique=True
     )
     business_criticality: Mapped[BusinessCriticality] = mapped_column(
-        String(32), default=BusinessCriticality.LOW, nullable=False
+        EnumType("veyl_api.enums:BusinessCriticality", length=32), default=BusinessCriticality.LOW, nullable=False
     )
     data_classification: Mapped[DataClassification] = mapped_column(
-        String(32), default=DataClassification.PUBLIC, nullable=False
+        EnumType("veyl_api.enums:DataClassification", length=32), default=DataClassification.PUBLIC, nullable=False
     )
     business_function: Mapped[BusinessFunction] = mapped_column(
-        String(32), default=BusinessFunction.OTHER, nullable=False
+        EnumType("veyl_api.enums:BusinessFunction", length=32), default=BusinessFunction.OTHER, nullable=False
     )
     owner: Mapped[AssetOwner] = mapped_column(
-        String(32), default=AssetOwner.UNASSIGNED, nullable=False
+        EnumType("veyl_api.enums:AssetOwner", length=32), default=AssetOwner.UNASSIGNED, nullable=False
     )
     owner_name: Mapped[str | None] = mapped_column(String(200))
     business_description: Mapped[str | None] = mapped_column(Text)
     context_source: Mapped[Provenance] = mapped_column(
-        String(32), default=Provenance.USER_PROVIDED, nullable=False
+        EnumType("veyl_api.enums:Provenance", length=32), default=Provenance.USER_PROVIDED, nullable=False
     )
     context_confidence: Mapped[Confidence] = mapped_column(
-        String(32), default=Confidence.HIGH, nullable=False
+        EnumType("veyl_api.enums:Confidence", length=32), default=Confidence.HIGH, nullable=False
     )
     updated_by_user_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("users.id", ondelete="SET NULL")
@@ -310,7 +339,7 @@ class Service(UUIDPrimaryKey, Timestamped, OrgScoped, Base):
     version: Mapped[str | None] = mapped_column(String(120))
     banner: Mapped[str | None] = mapped_column(Text)
     fingerprint_confidence: Mapped[Confidence] = mapped_column(
-        String(32), default=Confidence.LOW, nullable=False
+        EnumType("veyl_api.enums:Confidence", length=32), default=Confidence.LOW, nullable=False
     )
     #: JSON list of {"method": ..., "detail": ...} describing how we concluded this.
     fingerprint_evidence: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
@@ -379,10 +408,10 @@ class Scan(UUIDPrimaryKey, Timestamped, OrgScoped, Base):
     __table_args__ = (Index("ix_scan_org_started", "organization_id", "started_at"),)
 
     status: Mapped[ScanStatus] = mapped_column(
-        String(32), default=ScanStatus.QUEUED, nullable=False, index=True
+        EnumType("veyl_api.enums:ScanStatus", length=32), default=ScanStatus.QUEUED, nullable=False, index=True
     )
     trigger: Mapped[ScanTrigger] = mapped_column(
-        String(32), default=ScanTrigger.MANUAL, nullable=False
+        EnumType("veyl_api.enums:ScanTrigger", length=32), default=ScanTrigger.MANUAL, nullable=False
     )
     label: Mapped[str | None] = mapped_column(String(200))
     started_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False)
@@ -445,10 +474,10 @@ class Observation(UUIDPrimaryKey, Timestamped, OrgScoped, Base):
     #: Specific check within the collector, e.g. "http_headers", "cert_chain".
     subject: Mapped[str] = mapped_column(String(200), nullable=False)
     provenance: Mapped[Provenance] = mapped_column(
-        String(32), default=Provenance.OBSERVED, nullable=False
+        EnumType("veyl_api.enums:Provenance", length=32), default=Provenance.OBSERVED, nullable=False
     )
     confidence: Mapped[Confidence] = mapped_column(
-        String(32), default=Confidence.HIGH, nullable=False
+        EnumType("veyl_api.enums:Confidence", length=32), default=Confidence.HIGH, nullable=False
     )
     #: Structured payload. Treated as hostile input everywhere downstream.
     data: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
@@ -502,9 +531,15 @@ class RuleDefinitionRecord(UUIDPrimaryKey, Timestamped, Base):
 
     rule_id: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
     title: Mapped[str] = mapped_column(String(300), nullable=False)
-    category: Mapped[RuleCategory] = mapped_column(String(32), nullable=False)
-    severity: Mapped[Severity] = mapped_column(String(32), nullable=False)
-    default_confidence: Mapped[Confidence] = mapped_column(String(32), nullable=False)
+    category: Mapped[RuleCategory] = mapped_column(
+        EnumType("veyl_api.enums:RuleCategory",
+        length=32), nullable=False,
+    )
+    severity: Mapped[Severity] = mapped_column(EnumType("veyl_api.enums:Severity", length=32), nullable=False)
+    default_confidence: Mapped[Confidence] = mapped_column(
+        EnumType("veyl_api.enums:Confidence",
+        length=32), nullable=False,
+    )
     description: Mapped[str] = mapped_column(Text, nullable=False)
     detection: Mapped[str] = mapped_column(Text, nullable=False)
     evidence_requirements: Mapped[list[str]] = mapped_column(JSON, default=list)
@@ -535,13 +570,19 @@ class Finding(UUIDPrimaryKey, Timestamped, OrgScoped, Base):
         String(36), ForeignKey("assets.id", ondelete="CASCADE"), nullable=False
     )
     rule_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
-    rule_category: Mapped[RuleCategory] = mapped_column(String(32), nullable=False)
+    rule_category: Mapped[RuleCategory] = mapped_column(
+        EnumType("veyl_api.enums:RuleCategory",
+        length=32), nullable=False,
+    )
     title: Mapped[str] = mapped_column(String(300), nullable=False)
-    severity: Mapped[Severity] = mapped_column(String(32), nullable=False)
-    confidence: Mapped[Confidence] = mapped_column(String(32), nullable=False)
+    severity: Mapped[Severity] = mapped_column(EnumType("veyl_api.enums:Severity", length=32), nullable=False)
+    confidence: Mapped[Confidence] = mapped_column(
+        EnumType("veyl_api.enums:Confidence",
+        length=32), nullable=False,
+    )
 
     status: Mapped[FindingStatus] = mapped_column(
-        String(32), default=FindingStatus.OPEN, nullable=False
+        EnumType("veyl_api.enums:FindingStatus", length=32), default=FindingStatus.OPEN, nullable=False
     )
 
     description: Mapped[str] = mapped_column(Text, nullable=False)
@@ -611,10 +652,10 @@ class Evidence(UUIDPrimaryKey, Timestamped, OrgScoped, Base):
     detail: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     matcher: Mapped[str] = mapped_column(String(200), nullable=False)
     provenance: Mapped[Provenance] = mapped_column(
-        String(32), default=Provenance.OBSERVED, nullable=False
+        EnumType("veyl_api.enums:Provenance", length=32), default=Provenance.OBSERVED, nullable=False
     )
     confidence: Mapped[Confidence] = mapped_column(
-        String(32), default=Confidence.HIGH, nullable=False
+        EnumType("veyl_api.enums:Confidence", length=32), default=Confidence.HIGH, nullable=False
     )
     observed_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False)
     #: sha256 of the canonical ``detail`` payload, for tamper detection in reports.
@@ -632,7 +673,7 @@ class Remediation(UUIDPrimaryKey, Timestamped, OrgScoped, Base):
         String(36), ForeignKey("findings.id", ondelete="CASCADE"), nullable=False, unique=True
     )
     owner: Mapped[AssetOwner] = mapped_column(
-        String(32), default=AssetOwner.UNASSIGNED, nullable=False
+        EnumType("veyl_api.enums:AssetOwner", length=32), default=AssetOwner.UNASSIGNED, nullable=False
     )
     assignee_user_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("users.id", ondelete="SET NULL")
@@ -688,7 +729,9 @@ class VulnerabilityRecord(UUIDPrimaryKey, Timestamped, Base):
     source: Mapped[str] = mapped_column(String(64), nullable=False)
     cvss_score: Mapped[float | None] = mapped_column(Float)
     cvss_vector: Mapped[str | None] = mapped_column(String(120))
-    severity: Mapped[Severity | None] = mapped_column(String(32))
+    severity: Mapped[Severity | None] = mapped_column(
+        EnumType("veyl_api.enums:Severity", length=32)
+    )
     summary: Mapped[str] = mapped_column(Text, nullable=False)
     affected_product: Mapped[str] = mapped_column(String(200), nullable=False)
     affected_version_ranges: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
@@ -723,8 +766,14 @@ class ExposureChange(UUIDPrimaryKey, Timestamped, OrgScoped, Base):
     asset_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("assets.id", ondelete="CASCADE"), index=True
     )
-    change_type: Mapped[ChangeType] = mapped_column(String(48), nullable=False)
-    significance: Mapped[ChangeSignificance] = mapped_column(String(32), nullable=False)
+    change_type: Mapped[ChangeType] = mapped_column(
+        EnumType("veyl_api.enums:ChangeType",
+        length=48), nullable=False,
+    )
+    significance: Mapped[ChangeSignificance] = mapped_column(
+        EnumType("veyl_api.enums:ChangeSignificance",
+        length=32), nullable=False,
+    )
     subject: Mapped[str] = mapped_column(String(255), nullable=False)
 
     previous_state: Mapped[str | None] = mapped_column(Text)
@@ -734,9 +783,15 @@ class ExposureChange(UUIDPrimaryKey, Timestamped, OrgScoped, Base):
 
     #: Business context snapshot at detection time, denormalised so the change
     #: remains interpretable even if the asset is later reclassified.
-    asset_criticality: Mapped[BusinessCriticality | None] = mapped_column(String(32))
-    asset_environment: Mapped[Environment | None] = mapped_column(String(32))
-    business_function: Mapped[BusinessFunction | None] = mapped_column(String(32))
+    asset_criticality: Mapped[BusinessCriticality | None] = mapped_column(
+        EnumType("veyl_api.enums:BusinessCriticality", length=32)
+    )
+    asset_environment: Mapped[Environment | None] = mapped_column(
+        EnumType("veyl_api.enums:Environment", length=32)
+    )
+    business_function: Mapped[BusinessFunction | None] = mapped_column(
+        EnumType("veyl_api.enums:BusinessFunction", length=48)
+    )
     internet_exposed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     is_risk_increasing: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     risk_score: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
@@ -809,10 +864,10 @@ class AttackPath(UUIDPrimaryKey, Timestamped, OrgScoped, Base):
     name: Mapped[str] = mapped_column(String(300), nullable=False)
     summary: Mapped[str] = mapped_column(Text, nullable=False)
     state: Mapped[AttackPathState] = mapped_column(
-        String(32), default=AttackPathState.POTENTIAL, nullable=False
+        EnumType("veyl_api.enums:AttackPathState", length=32), default=AttackPathState.POTENTIAL, nullable=False
     )
     confidence: Mapped[Confidence] = mapped_column(
-        String(32), default=Confidence.MEDIUM, nullable=False
+        EnumType("veyl_api.enums:Confidence", length=32), default=Confidence.MEDIUM, nullable=False
     )
     risk_score: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
     #: Ordered list of graph node keys forming the chain.
@@ -838,10 +893,13 @@ class Report(UUIDPrimaryKey, Timestamped, OrgScoped, Base):
     __tablename__ = "reports"
     __table_args__ = (Index("ix_report_org_created", "organization_id", "created_at"),)
 
-    kind: Mapped[ReportKind] = mapped_column(String(32), nullable=False)
-    fmt: Mapped[ReportFormat] = mapped_column(String(16), nullable=False)
+    kind: Mapped[ReportKind] = mapped_column(EnumType("veyl_api.enums:ReportKind", length=32), nullable=False)
+    fmt: Mapped[ReportFormat] = mapped_column(
+        EnumType("veyl_api.enums:ReportFormat",
+        length=16), nullable=False,
+    )
     status: Mapped[ReportStatus] = mapped_column(
-        String(32), default=ReportStatus.PENDING, nullable=False
+        EnumType("veyl_api.enums:ReportStatus", length=32), default=ReportStatus.PENDING, nullable=False
     )
     title: Mapped[str] = mapped_column(String(300), nullable=False)
     scan_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("scans.id", ondelete="SET NULL"))
@@ -872,7 +930,10 @@ class AuditLog(UUIDPrimaryKey, OrgScoped, Base):
         Index("ix_audit_org_action", "organization_id", "action"),
     )
 
-    action: Mapped[AuditAction] = mapped_column(String(48), nullable=False)
+    action: Mapped[AuditAction] = mapped_column(
+        EnumType("veyl_api.enums:AuditAction",
+        length=48), nullable=False,
+    )
     actor_user_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("users.id", ondelete="SET NULL")
     )
