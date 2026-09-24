@@ -95,6 +95,21 @@ class Settings(BaseSettings):
     # -- Rate limiting ------------------------------------------------------
     rate_limit_per_minute: int = 120
 
+    trust_proxy_headers: bool = Field(
+        default=False,
+        description=(
+            "Honor X-Forwarded-For for the client address recorded in the audit log. "
+            "Enable only when a trusted reverse proxy sets the header; otherwise a "
+            "caller can write an arbitrary address into the audit trail."
+        ),
+    )
+
+    # -- Artifacts ----------------------------------------------------------
+    artifact_dir: str = Field(
+        default="./artifacts",
+        description="Directory for generated report files. Paths are always resolved under it.",
+    )
+
     # -- CORS ---------------------------------------------------------------
     cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
 
