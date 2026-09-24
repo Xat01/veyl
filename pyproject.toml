@@ -1,0 +1,89 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "veyl"
+version = "0.1.0"
+description = "Veyl — Continuous Exposure Intelligence"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Veyl Security" }]
+keywords = ["security", "attack-surface-management", "exposure-management", "devsecops"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Information Technology",
+  "Topic :: Security",
+  "License :: OSI Approved :: Apache Software License",
+  "Programming Language :: Python :: 3 :: Only",
+]
+dependencies = [
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.32",
+  "pydantic>=2.9",
+  "pydantic-settings>=2.6",
+  "sqlalchemy>=2.0.36",
+  "alembic>=1.14",
+  "passlib[bcrypt]>=1.7.4",
+  "bcrypt>=4.0,<4.1",
+  "pyjwt>=2.9",
+  "python-multipart>=0.0.12",
+  "httpx>=0.27",
+  "dnspython>=2.7",
+  "cryptography>=43",
+  "jinja2>=3.1",
+  "python-dateutil>=2.9",
+  "email-validator>=2.2",
+]
+
+[project.optional-dependencies]
+postgres = ["psycopg[binary]>=3.2"]
+nmap = ["python-nmap>=0.7.1"]
+dev = [
+  "pytest>=8.3",
+  "pytest-asyncio>=0.24",
+  "pytest-cov>=6.0",
+  "ruff>=0.7",
+  "mypy>=1.13",
+  "types-python-dateutil",
+]
+
+[project.scripts]
+veyl-api = "veyl_api.__main__:main"
+veyl-worker = "veyl_api.worker.__main__:main"
+veyl-demo = "veyl_api.demo.__main__:main"
+
+[tool.setuptools.packages.find]
+where = [".", "apps/api", "packages", "services"]
+include = ["veyl_api*", "veyl_rules*", "veyl_scanner*", "veyl_analyzer*", "veyl_correlation*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+filterwarnings = ["ignore::DeprecationWarning"]
+addopts = "-q --strict-markers"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["apps/api", "packages", "services", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "S", "C4", "SIM", "RET", "ARG", "PTH"]
+ignore = [
+  "S101",   # assert is fine in tests
+  "S104",   # binding to 0.0.0.0 is deliberate inside containers
+  "B008",   # FastAPI Depends() in defaults is idiomatic
+  "SIM108", # ternaries are not always clearer
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S", "ARG"]
+"demo/**" = ["S", "ARG"]
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+warn_unused_ignores = false
+disallow_untyped_defs = false
