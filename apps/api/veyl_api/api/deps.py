@@ -92,8 +92,15 @@ def _resolve_organization(
 ) -> tuple[Organization, OrganizationMember]:
     """Pick the organization this request acts within, and prove membership.
 
+    Precedence is explicit: an ``X-Organization`` header from the caller, then
+    the organization baked into the token, then — only if the user belongs to
+    exactly one — that one. Anything ambiguous is refused rather than guessed,
+    because silently picking a tenant is how one customer's data ends up in
+    another customer's response.
+
     Raises:
-        HTTPException: 403 when the user has no usable membership.
+        HTTPException: 403 when the user has no usable membership; 400 when the
+            choice is ambiguous.
     """
     stmt = (
         select(OrganizationMember, Organization)
@@ -112,14 +119,30 @@ def _resolve_organization(
             detail="your account is not an active member of any organization",
         )
 
-    slug = requested_slug or payload.get("org_slug")
-    if slug:
+    # An explicit header always wins, and is matched by slug or by id so a
+    # client is not forced to know which form it holds.
+    if requested_slug:
         for membership, org in usable:
-            if org.slug == slug:
+            if org.slug == requested_slug or org.id == requested_slug:
                 return org, membership
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"you are not a member of organization {slug!r}",
+            detail=f"you are not a member of organization {requested_slug!r}",
+        )
+
+    # The token names the organization the caller logged in under. Honouring it
+    # is what makes a multi-organization session usable: without it every
+    # follow-up request would be ambiguous.
+    token_org_id = payload.get("org") or payload.get("org_id")
+    if token_org_id:
+        for membership, org in usable:
+            if org.id == token_org_id:
+                return org, membership
+        # The token names an organization the caller is no longer in. Refuse
+        # rather than fall through to a different tenant.
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="the organization in your token is no longer available to you",
         )
 
     if len(usable) > 1:

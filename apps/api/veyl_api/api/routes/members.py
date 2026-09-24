@@ -16,7 +16,6 @@ from sqlalchemy import func, select
 from veyl_api.api.deps import DbSession, require
 from veyl_api.api.schemas import MemberCreate, MemberSummary, MemberUpdate, Page
 from veyl_api.audit import AuditRecord, write_audit
-from veyl_api.db.base import utcnow
 from veyl_api.enums import AuditAction, OrganizationRole
 from veyl_api.models import OrganizationMember, User
 from veyl_api.security.auth import hash_password

@@ -33,16 +33,15 @@ from veyl_api.api.schemas import (
     ScopeEntryCreate,
     ScopeEntryOut,
     ScopeEntryUpdate,
+    ServiceFingerprintEvidence,
     ServiceOut,
 )
 from veyl_api.audit import AuditRecord, write_audit
 from veyl_api.db.base import utcnow
 from veyl_api.enums import (
-    AssetStatus,
     AuditAction,
     FindingStatus,
     Severity,
-    VulnerabilityStatus,
 )
 from veyl_api.models import (
     Asset,
@@ -349,13 +348,22 @@ def _service_out(service: Service) -> ServiceOut:
         id=service.id,
         port=service.port,
         protocol=service.protocol,
+        state=service.state,
         service_name=service.service_name,
         product=service.product,
         version=service.version,
         banner=service.banner,
-        fingerprint_source=service.fingerprint_source,
-        confidence=service.confidence,
+        fingerprint_confidence=service.fingerprint_confidence,
+        fingerprint_evidence=[
+            ServiceFingerprintEvidence(
+                method=(item or {}).get("method"),
+                detail=(item or {}).get("detail"),
+            )
+            for item in (service.fingerprint_evidence or [])
+        ],
         is_encrypted=service.is_encrypted,
+        is_administrative=service.is_administrative,
+        is_database=service.is_database,
         first_seen=service.first_seen,
         last_seen=service.last_seen,
     )

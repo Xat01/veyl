@@ -65,7 +65,7 @@ def get_graph(
         session.execute(
             select(GraphEdge)
             .where(*edge_conditions)
-            .order_by(GraphEdge.risk_score.desc())
+            .order_by(GraphEdge.weight.desc(), GraphEdge.source_key)
             .limit(max_edges)
         ).scalars()
     )
@@ -90,7 +90,7 @@ def get_graph(
                 target_key=e.target_key,
                 edge_type=e.edge_type,
                 properties=dict(e.properties or {}),
-                risk_score=e.risk_score,
+                weight=e.weight,
             )
             # Only edges whose endpoints survived the node limit: an edge to an
             # absent node would render as a dangling line.
@@ -109,9 +109,10 @@ def rebuild_graph(session: DbSession, context=require("asset:write")) -> GraphOu
     Idempotent: running it twice produces the same graph, because nodes are keyed
     by identity rather than by insertion order.
     """
+    from veyl_correlation import rebuild_graph as _rebuild
+
     from veyl_api.audit import AuditRecord, write_audit
     from veyl_api.enums import AuditAction
-    from veyl_correlation import rebuild_graph as _rebuild
 
     stats = _rebuild(session, organization_id=context.organization.id)
     write_audit(

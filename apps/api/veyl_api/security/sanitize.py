@@ -10,6 +10,7 @@ import hashlib
 import json
 import re
 import unicodedata
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
@@ -171,21 +172,26 @@ def is_safe_relative_path(path: str) -> bool:
     return ".." not in normalized.split("/")
 
 
-def safe_join(base: str, *parts: str) -> str:
+def safe_join(base: str | Path, *parts: str) -> Path:
     """Join path components, refusing anything that escapes ``base``.
+
+    Returns a ``Path`` rather than a string because every caller immediately
+    treats the result as one (``.parent``, ``.is_file()``, ``.read_text()``), and
+    a bare ``str`` fails on those in ways that only show up at runtime.
 
     Uses the standard library's ``os.path.commonpath`` check rather than string
     prefix matching, which is defeated by symlinks and case differences.
     """
     import os
 
+    base_text = os.fspath(base)
     for part in parts:
         if not is_safe_relative_path(part):
             raise ValueError(f"refusing unsafe path component: {part!r}")
-    target = os.path.normpath(os.path.join(base, *parts))
-    base_norm = os.path.normpath(base)
+    target = os.path.normpath(os.path.join(base_text, *parts))
+    base_norm = os.path.normpath(base_text)
     if os.path.commonpath([os.path.abspath(target), os.path.abspath(base_norm)]) != os.path.abspath(
         base_norm
     ):
         raise ValueError(f"path escapes base directory: {target!r}")
-    return target
+    return Path(target)

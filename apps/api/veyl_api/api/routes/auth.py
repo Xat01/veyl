@@ -134,7 +134,10 @@ def refresh(payload: RefreshRequest, session: DbSession) -> TokenResponse:
             detail="user no longer exists or is deactivated",
         )
 
-    org, membership = _resolve_organization(session, user, decoded, decoded.get("org_slug"))
+    # No explicit slug here: the refresh token already names the organization it
+    # was issued for, and the resolver reads that claim. Passing a slug would
+    # discard it and make every multi-organization refresh ambiguous.
+    org, membership = _resolve_organization(session, user, decoded, None)
     pair = create_token_pair(
         user_id=user.id, organization_id=org.id, role=membership.role.value
     )

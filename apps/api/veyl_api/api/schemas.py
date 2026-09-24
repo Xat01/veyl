@@ -272,17 +272,35 @@ class ScanOut(APIModel):
 # ---------------------------------------------------------------------------
 
 
+class ServiceFingerprintEvidence(APIModel):
+    """One piece of evidence behind a service fingerprint.
+
+    Exposed rather than summarised so a reader can judge the conclusion instead
+    of trusting it. "We saw an SSH banner" and "the port number was 22" are very
+    different qualities of evidence, and only the caller knows which is enough.
+    """
+
+    method: str | None = None
+    detail: str | None = None
+
+
 class ServiceOut(APIModel):
     id: str
     port: int
     protocol: str
-    service_name: str | None
+    state: str
+    service_name: str | None = Field(
+        default=None,
+        description="Fingerprint name. 'unknown' is a real answer; it is never guessed.",
+    )
     product: str | None
     version: str | None
     banner: str | None
-    fingerprint_source: str
-    confidence: Confidence
+    fingerprint_confidence: Confidence
+    fingerprint_evidence: list[ServiceFingerprintEvidence] = Field(default_factory=list)
     is_encrypted: bool
+    is_administrative: bool
+    is_database: bool
     first_seen: datetime
     last_seen: datetime
 
@@ -520,7 +538,7 @@ class GraphEdgeOut(APIModel):
     target_key: str
     edge_type: str
     properties: dict[str, Any] = Field(default_factory=dict)
-    risk_score: float
+    weight: float = 1.0
 
 
 class GraphOut(APIModel):

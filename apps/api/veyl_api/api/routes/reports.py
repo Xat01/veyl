@@ -177,7 +177,7 @@ def download_report(
 
     root = Path(settings.artifact_dir).resolve()
     try:
-        path = safe_join(str(root), record.artifact_path)
+        path = safe_join(root, record.artifact_path)
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

@@ -31,7 +31,6 @@ from veyl_api.models import (
     ScopeEntry,
 )
 from veyl_api.security.sanitize import checksum, safe_join, sanitize_filename
-
 from veyl_reporting.renderers import ReportContext, render
 
 _SEVERITY_ORDER = ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"]
@@ -409,12 +408,11 @@ def generate_report(
 
 
 def _default_title(kind: ReportKind) -> str:
-    label = (
+    return (
         "Executive exposure report"
         if _enum_value(kind) == ReportKind.EXECUTIVE.value
         else "Technical findings report"
     )
-    return label
 
 
 def _write_artifact(
@@ -439,10 +437,10 @@ def _write_artifact(
         f"{_enum_value(kind).lower()}-{report_id or utcnow().strftime('%Y%m%d%H%M%S')}.{extension}"
     )
     relative = Path(organization_id) / filename
-    target = safe_join(str(base), str(relative))
+    target = safe_join(base, relative.as_posix())
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(body, encoding="utf-8")
-    return str(relative).replace("\\", "/")
+    return relative.as_posix()
 
 
 __all__ = ["build_context", "generate_report"]

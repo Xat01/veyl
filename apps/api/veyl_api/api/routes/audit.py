@@ -14,7 +14,7 @@ from sqlalchemy import func, select
 from veyl_api.api.deps import DbSession, require
 from veyl_api.api.schemas import AuditEntryOut, AuditVerificationOut, Page
 from veyl_api.audit import verify_chain
-from veyl_api.models import AuditLog, User
+from veyl_api.models import AuditLog
 
 router = APIRouter()
 
