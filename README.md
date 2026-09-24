@@ -112,8 +112,9 @@ non-loopback bind or a production environment.
 ## Tests
 
 ```bash
-python -m pytest               # full suite
+python -m pytest                      # 223 tests
 python -m pytest tests/security -v    # the safety properties specifically
+python scripts/acceptance_test.py     # 35-step end-to-end run over HTTP
 ruff check .
 ```
 
@@ -121,6 +122,12 @@ The security suite covers the properties the product depends on: the SSRF floor
 (loopback, link-local, cloud metadata, numeric and IPv4-mapped encodings), scope
 enforcement boundaries, audit-chain tamper detection, the evidence contract, and the
 privileged-account authentication policy.
+
+`scripts/acceptance_test.py` is separate from pytest on purpose. It starts a real server and
+drives the API in the order a person would — authorize, scan, read the evidence, set business
+context, watch the risk move, inspect the graph, assign a remediation, generate a report,
+verify the audit chain. It found a `500` in the remediation handler that 223 passing unit and
+integration tests had missed.
 
 ## Configuration
 

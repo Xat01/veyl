@@ -8,7 +8,12 @@ python -m pytest tests/security -v  # the safety properties, verbose
 python -m pytest -k ssrf            # by keyword
 python -m pytest --tb=long -x       # stop at the first failure
 ruff check .
+
+python scripts/acceptance_test.py   # 35-step end-to-end run over HTTP (§47)
 ```
+
+The acceptance test is separate from pytest on purpose. See
+[the end-to-end test](#the-end-to-end-test) below.
 
 Windows: if pytest hangs or errors during teardown with a bulk-delete complaint, that is
 temp-directory cleanup, not a failing test.
@@ -42,6 +47,43 @@ Everything else is ordinary correctness. Those four are the product.
 
 Counts are collected tests; the `def test_` count is lower because several are
 parametrized — the SSRF suite runs one case per attack vector.
+
+## The end-to-end test
+
+`scripts/acceptance_test.py` is not pytest, and that is deliberate. pytest is good at
+"does this function do what it says"; it is bad at "does the product work when you use it".
+The unit and integration suites had 223 passing tests and still missed a handler that
+returned `500` on the most common action in the product.
+
+So this script builds the demo environment, starts a real uvicorn server, and drives the
+HTTP API in the order a person would: authorize a target, scan it, read the evidence,
+supply business context, watch the risk score move, look at what changed, inspect the
+graph, follow an attack path, assign a remediation, generate a report, verify the audit
+chain.
+
+```bash
+python scripts/acceptance_test.py
+python scripts/acceptance_test.py --keep-db   # inspect the database afterwards
+```
+
+Exit code is `0` only if every step passed. A step that cannot run is reported `SKIP` with
+the reason and never counts as a pass — an unavailable test that silently reads as green is
+how a suite rots.
+
+It asserts the claims, not just the status codes: that every finding cites evidence, that
+the risk score names its factors, that attack paths state their limitations, that a rebuild
+is idempotent, that authorizing the cloud metadata address is not enough to scan it, and
+that PDF reporting is `501` rather than a broken file.
+
+**On the first run, 11 of 35 steps failed.** Ten were wrong expectations in the test — I
+had guessed at response codes and field names instead of reading the schemas, and one
+assertion was simply wrong about the product (I assumed an analyst could not read the audit
+log; `SECURITY_ANALYST` is granted `audit:read`, so the test was wrong and the code was
+right). The eleventh was a real defect. Each wrong expectation was corrected against the
+actual schema rather than by relaxing the assertion, because a test that is loosened to pass
+is worse than no test.
+
+
 
 ## The suites that matter
 
