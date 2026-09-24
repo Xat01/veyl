@@ -54,9 +54,28 @@ veyl-api = "veyl_api.__main__:main"
 veyl-worker = "veyl_api.worker.__main__:main"
 veyl-demo = "veyl_api.demo.__main__:main"
 
-[tool.setuptools.packages.find]
-where = [".", "apps/api", "packages", "services"]
-include = ["veyl_api*", "veyl_rules*", "veyl_scanner*", "veyl_analyzer*", "veyl_correlation*"]
+[tool.setuptools]
+# The monorepo puts each importable package one or two directories deep, and the
+# intermediate directories are plain folders rather than Python packages. Mapping
+# each package to its source directory explicitly is more predictable than
+# relying on package discovery to traverse them, and it makes the published
+# top-level module names obvious from this file alone.
+packages = [
+  "veyl_api",
+  "veyl_rules",
+  "veyl_scanner",
+  "veyl_analyzer",
+  "veyl_correlation",
+  "veyl_reporting",
+]
+
+[tool.setuptools.package-dir]
+veyl_api = "apps/api/veyl_api"
+veyl_rules = "packages/rules/veyl_rules"
+veyl_scanner = "services/scanner/veyl_scanner"
+veyl_analyzer = "services/analyzer/veyl_analyzer"
+veyl_correlation = "services/correlation/veyl_correlation"
+veyl_reporting = "services/reporting/veyl_reporting"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
