@@ -19,10 +19,14 @@ from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import urljoin, urlparse
 
-from veyl_api.config import settings
-from veyl_api.enums import Confidence, Provenance
+from veyl_api.enums import Confidence
 from veyl_api.security.sanitize import redact_headers, truncate
-from veyl_scanner.contracts import CollectResult, CollectorRegistration, ObservationPayload, ScanRequest
+from veyl_scanner.contracts import (
+    CollectorRegistration,
+    CollectResult,
+    ObservationPayload,
+    ScanRequest,
+)
 
 #: Security-relevant response headers we always record verbatim.
 INTERESTING_HEADERS: tuple[str, ...] = (
@@ -67,6 +71,19 @@ DISCOVERY_PATHS: tuple[str, ...] = (
     "/.env",
     "/server-status",
     "/.well-known/openid-configuration",
+    # Administrative surfaces. These are probed because the authentication
+    # rules can only reason about an interface Veyl has actually requested. The
+    # probe is a single unauthenticated GET with no payload and no credential
+    # attempt; it is the minimum required to answer "does this respond, and
+    # does it present a challenge?". Omitting them would make the rules dead
+    # code, which is worse than a bounded, non-destructive request.
+    "/admin",
+    "/admin/login",
+    "/wp-admin",
+    "/phpmyadmin",
+    "/console",
+    "/manager/html",
+    "/actuator/env",
 )
 
 #: Response bodies are only kept for a bounded prefix; enough to fingerprint,
@@ -241,7 +258,7 @@ def safe_get(
         hop.tls = tls_info
         hop.elapsed_ms = round((time.perf_counter() - started) * 1000.0, 2)
         conn.close()
-    except (TimeoutError, socket.timeout):
+    except TimeoutError:
         hop.error = "request timed out"
     except ssl.SSLError as exc:
         hop.error = f"TLS error: {exc}"
@@ -461,28 +478,48 @@ class HttpCollector:
         probe_paths: bool = True,
         discover_paths: bool = True,
         validate_hook: Any = None,
+        ports: list[int] | None = None,
     ) -> None:
         self.probe_paths = probe_paths
         self.discover_paths = discover_paths
         self.validate_hook = validate_hook
+        #: Explicit set of ports to treat as HTTP candidates. When omitted the
+        #: collector falls back to the conventional web ports present in the
+        #: request. Callers that have fingerprint data should pass the ports
+        #: they actually identified as HTTP, so that Veyl stops sending HTTP
+        #: requests at database and RPC listeners.
+        self.ports = ports
 
     def collect(self, request: ScanRequest) -> CollectResult:
         result = CollectResult()
-        https_ports = [p for p in request.ports if p in (443, 8443) or p > 1024]
-        http_ports = [p for p in request.ports if p in (80, 8080)]
 
-        if 443 in request.ports or 8443 in request.ports:
-            self._probe_scheme(request, "https", result, prefer=[p for p in (443, 8443) if p in request.ports])
-        if 80 in request.ports or 8080 in request.ports:
-            self._probe_scheme(request, "http", result, prefer=[p for p in (80, 8080) if p in request.ports])
+        candidates = self._candidate_ports(request)
+        if not candidates:
+            return result
 
-        # Any other open high port is worth a quick HTTP probe: this is how
-        # Veyl finds the staging service a developer left running on 8081.
-        extra = [p for p in request.ports if p not in {80, 443, 8080, 8443} and p > 1024]
-        if extra:
-            self._probe_scheme(request, "https", result, prefer=extra[:4])
+        plain = [p for p in candidates if p in (80, 8080, 8000, 8888, 3000, 5000, 9000)]
+        secure = [p for p in candidates if p in (443, 8443)]
+        other = [p for p in candidates if p not in plain and p not in secure]
+
+        if secure:
+            self._probe_scheme(request, "https", result, prefer=secure)
+        if plain:
+            self._probe_scheme(request, "http", result, prefer=plain)
+        # A port that is neither conventionally plain nor conventionally secure
+        # is probed with both schemes, cheapest first, because that is how Veyl
+        # finds the staging service a developer left running on 8081. The result
+        # records which scheme actually answered, so a failure is attributable.
+        if other:
+            self._probe_scheme(request, "http", result, prefer=other[:4])
+            self._probe_scheme(request, "https", result, prefer=other[:4])
 
         return result
+
+    def _candidate_ports(self, request: ScanRequest) -> list[int]:
+        """Ports worth speaking HTTP to, in a stable order."""
+        if self.ports is not None:
+            return [p for p in request.ports if p in set(self.ports)]
+        return [p for p in request.ports if p in (80, 443, 8080, 8443)]
 
     def _probe_scheme(
         self,
@@ -669,9 +706,11 @@ class HttpCollector:
 
             body_markers: list[str] = []
             body_lower = hop.body_prefix.lower()
-            if path == "/openapi.json" or path == "/swagger.json":
-                if '"openapi"' in body_lower or '"swagger"' in body_lower:
-                    body_markers.append("openapi_document")
+            if (
+                path in ("/openapi.json", "/swagger.json")
+                and ('"openapi"' in body_lower or '"swagger"' in body_lower)
+            ):
+                body_markers.append("openapi_document")
             if path == "/.env" and ("=" in hop.body_prefix and "APP_" in hop.body_prefix.upper()):
                 body_markers.append("dotenv_like_content")
             if path == "/.git/config" and "[core]" in body_lower:

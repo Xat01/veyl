@@ -6,6 +6,15 @@ should never face the internet is exposed to it.
 Severity here is calibrated on *exposure plus class of service*, never on the
 port number alone. An open 5432 on an internal-only host is not the same finding
 as an open 5432 on an internet-reachable host, and the rules say so.
+
+**A note on the word "exposed".** A port sweep establishes that a port accepted
+a connection *from the position Veyl ran at*. That is reachability, not internet
+exposure. Veyl only learns which assets are internet-exposed from the
+organization's own asset context, so these rules describe reachability and let
+``context.internet_exposed`` decide whether to say "internet-reachable" or the
+narrower, always-true "reachable from the scanning position". Claiming internet
+exposure from an open port would be exactly the kind of invention this product
+exists to avoid.
 """
 
 from __future__ import annotations
@@ -59,6 +68,33 @@ def _open_ports(context: RuleContext) -> list[int]:
         return []
     ports = scan.get("open_ports", [])
     return sorted(int(p) for p in ports if isinstance(p, int | str) and str(p).isdigit())
+
+
+def _exposure_phrase(context: RuleContext) -> str:
+    """Describe the exposure we actually established, no more.
+
+    "Internet-exposed" is a claim about the asset's network position, which Veyl
+    learns from asset context, not from a successful TCP connect. When the
+    organization has told us the asset is internet-exposed we may say so; when it
+    has not, the honest statement is reachability from the scanning position.
+    """
+    if context.internet_exposed:
+        return "reachable from the internet-facing scanning position"
+    return "reachable from the scanning position"
+
+
+def _exposure_clause(context: RuleContext) -> str:
+    """A sentence fragment for the impact text, matching :func:`_exposure_phrase`."""
+    if context.internet_exposed:
+        return (
+            "The asset is registered as internet-exposed, so every host on the public "
+            "internet can reach this port."
+        )
+    return (
+        "Veyl reached this port from the scanning position; whether it is reachable "
+        "from the public internet depends on network controls Veyl cannot observe from "
+        "here. Veyl did not establish that this service faces the internet."
+    )
 
 
 def _service_for(context: RuleContext, port: int) -> dict | None:
@@ -121,7 +157,7 @@ def check_exposed_database(context: RuleContext) -> list[RuleMatch]:
         matches.append(
             RuleMatch(
                 subject_suffix=f"port-{port}",
-                summary=f"{product} is reachable on TCP/{port}",
+                summary=f"{product} is {_exposure_phrase(context)} on TCP/{port}",
                 detection_explanation=(
                     f"TCP/{port} responded as open during the port sweep and the service on it "
                     f"was {product_phrase}. Veyl determined this from the port state recorded by "
@@ -139,9 +175,9 @@ def check_exposed_database(context: RuleContext) -> list[RuleMatch]:
                     f"broadly than intended, the primary risks are: authentication weaknesses "
                     f"becoming directly reachable, unauthenticated administrative commands in "
                     f"services that assume a trusted network (Redis and Memcached in particular), "
-                    f"and bulk data extraction if credentials are weak or reused. Veyl has "
-                    f"observed reachability only; it has not attempted to authenticate or read "
-                    f"data."
+                    f"and bulk data extraction if credentials are weak or reused. "
+                    f"{_exposure_clause(context)} Veyl has observed reachability only; it has not "
+                    f"attempted to authenticate or read data."
                 ),
                 evidence=evidence,
                 confidence=confidence,
@@ -149,6 +185,7 @@ def check_exposed_database(context: RuleContext) -> list[RuleMatch]:
                     "service_class": "database",
                     "port": port,
                     "confirmed_product": confirmed,
+                    "internet_exposed": context.internet_exposed,
                 },
             )
         )
@@ -201,7 +238,7 @@ def check_exposed_administrative_service(context: RuleContext) -> list[RuleMatch
         matches.append(
             RuleMatch(
                 subject_suffix=f"port-{port}",
-                summary=f"{label} administrative service reachable on TCP/{port}",
+                summary=f"{label} administrative service {_exposure_phrase(context)} on TCP/{port}",
                 detection_explanation=(
                     f"TCP/{port} reported open. This port carries {label}, an administrative or "
                     f"remote-access interface. "
@@ -218,8 +255,9 @@ def check_exposed_administrative_service(context: RuleContext) -> list[RuleMatch
                     f"rather than data alone. Reachability does not by itself mean the interface is "
                     f"weakly protected: Veyl has not attempted authentication. What it does mean is "
                     f"that every credential-stuffing campaign, exposed-key scan and vulnerability "
-                    f"in {label} now has a directly reachable target, and that any authentication "
-                    f"bypass in that software is exploitable from the assessed position. "
+                    f"in {label} now has a reachable target, and that any authentication bypass in "
+                    f"that software is exercisable from wherever the service can be reached. "
+                    f"{_exposure_clause(context)} "
                     + (
                         "Telnet transmits credentials in cleartext, so any network observer can "
                         "recover them."
@@ -234,6 +272,7 @@ def check_exposed_administrative_service(context: RuleContext) -> list[RuleMatch
                     "service_class": "administrative",
                     "port": port,
                     "control_plane": lower_port or port in {22, 3389, 445},
+                    "internet_exposed": context.internet_exposed,
                 },
             )
         )
@@ -406,13 +445,15 @@ def check_port_surface_growth(context: RuleContext) -> list[RuleMatch]:
 NETWORK_RULES: list[RuleDefinition] = [
     RuleDefinition(
         rule_id="VEYL-NET-001",
-        title="Internet-exposed database service",
+        title="Database service reachable from an untrusted position",
         category=RuleCategory.NETWORK,
         severity=Severity.HIGH,
         default_confidence=Confidence.HIGH,
         description=(
             "A database or cache service is reachable on the network. Data stores are not "
-            "intended to be directly reachable by arbitrary hosts."
+            "intended to be directly reachable by arbitrary hosts. The title deliberately does "
+            "not say 'internet-exposed': Veyl established reachability from the scanning "
+            "position, and whether that is internet exposure depends on asset context."
         ),
         detection=(
             "Fires when the port sweep reports an open port that belongs to a known database "
@@ -434,13 +475,14 @@ NETWORK_RULES: list[RuleDefinition] = [
     ),
     RuleDefinition(
         rule_id="VEYL-NET-002",
-        title="Internet-exposed administrative service",
+        title="Administrative service reachable from an untrusted position",
         category=RuleCategory.NETWORK,
         severity=Severity.MEDIUM,
         default_confidence=Confidence.HIGH,
         description=(
             "A remote-administration interface (SSH, RDP, SMB, VNC, Docker or Kubernetes "
-            "control plane, management console) is reachable on the network."
+            "control plane, management console) is reachable on the network. As with "
+            "VEYL-NET-001, the title states reachability rather than internet exposure."
         ),
         detection=(
             "Fires when the port sweep reports an open port belonging to an administrative class. "

@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -23,13 +23,10 @@ from veyl_api.config import settings
 from veyl_api.db.base import utcnow
 from veyl_api.enums import (
     AssetType,
-    AuthorizationStatus,
     BusinessCriticality,
-    ChangeSignificance,
     Confidence,
     DataClassification,
     Environment,
-    FindingStatus,
     Provenance,
     ScanStatus,
     ScanTrigger,
@@ -40,17 +37,23 @@ from veyl_api.models import (
     AssetSnapshot,
     Certificate,
     ExposureChange,
-    Finding,
     Observation,
     Scan,
     ScopeEntry,
     Service,
 )
-from veyl_api.safety.firewall import TargetRejection, TargetRejectionReason, UnsafeTargetError, validate_port, validate_target
+from veyl_api.safety.firewall import (
+    TargetRejection,
+    TargetRejectionReason,
+    UnsafeTargetError,
+    validate_port,
+    validate_target,
+)
 from veyl_api.safety.scope import ScopeGuard
 from veyl_api.security.sanitize import checksum, deep_sanitize_json, truncate
-from veyl_scanner.contracts import CollectResult, ObservationPayload, ScanRequest
+from veyl_scanner.contracts import ObservationPayload, ScanRequest
 from veyl_scanner.dns import DnsCollector
+from veyl_scanner.fingerprint import ServiceFingerprint, fingerprint_services
 from veyl_scanner.http import HttpCollector
 from veyl_scanner.portscan import get_port_scanner
 from veyl_scanner.tls import TlsCollector
@@ -108,6 +111,52 @@ _DATABASE_PORTS = frozenset({1433, 1521, 3306, 5432, 5984, 6379, 9042, 9200, 270
 _ENCRYPTED_PORTS = frozenset({443, 465, 636, 993, 995, 8443, 9443})
 
 
+#: Ports that conventionally serve HTTP without TLS.
+_PLAIN_HTTP_PORTS = frozenset({80, 3000, 5000, 8000, 8008, 8080, 8081, 8888, 9000, 9090})
+
+#: Ports that conventionally serve HTTPS.
+_SECURE_HTTP_PORTS = frozenset({443, 8443})
+
+
+def _port_in_range(port: object) -> bool:
+    """True when ``port`` is a usable TCP port number, ignoring the allowlist."""
+    return isinstance(port, int) and not isinstance(port, bool) and 1 <= port <= 65535
+
+
+def _http_candidate_ports(
+    open_ports: list[int], fingerprints: list[ServiceFingerprint]
+) -> list[int]:
+    """Ports that are plausible HTTP listeners.
+
+    Three sources of signal, in descending strength:
+
+    1. A fingerprint that positively identified http/https. This is evidence.
+    2. A conventional web port number. This is a hint.
+    3. A port whose fingerprint came back ``unknown``. This is an *unresolved*
+       port, and probing it with HTTP is precisely how an unknown service gets
+       identified. It is included deliberately, but the results are recorded as
+       a probe outcome rather than as a service, so an unreachable or
+       non-HTTP port yields a recorded non-detection rather than a false fact.
+
+    A port identified as something definitely *not* HTTP (a database, an RPC
+    endpoint, a mail port) is excluded, so Veyl stops aiming web requests at
+    services that were never web services.
+    """
+    by_port = {f.port: f for f in fingerprints}
+    candidates: set[int] = set()
+    for fingerprint in fingerprints:
+        if fingerprint.service_name in ("http", "https", "http-alt", "https-alt"):
+            candidates.add(fingerprint.port)
+    for port in open_ports:
+        if port in _PLAIN_HTTP_PORTS or port in _SECURE_HTTP_PORTS:
+            candidates.add(port)
+            continue
+        fingerprint = by_port.get(port)
+        if fingerprint is not None and fingerprint.service_name == "unknown":
+            candidates.add(port)
+    return sorted(candidates)
+
+
 def infer_environment(scope_entry: ScopeEntry | None, hostname: str) -> Environment:
     """Infer environment from the scope entry, falling back to the hostname.
 
@@ -144,6 +193,7 @@ class ScanRunner:
         label: str | None = None,
         enable_ct: bool = False,
         enable_subdomain_discovery: bool = True,
+        port_override: list[int] | None = None,
     ) -> None:
         self.session = session
         self.organization_id = organization_id
@@ -152,6 +202,11 @@ class ScanRunner:
         self.label = label
         self.enable_ct = enable_ct
         self.enable_subdomain_discovery = enable_subdomain_discovery
+        #: An explicit port list for this run, bypassing the default allowlist.
+        #: Only honoured for a scope entry that has opted in via
+        #: ``allow_port_override``, so a caller cannot widen the sweep for a
+        #: target whose owner has not agreed to it.
+        self.port_override = port_override
         self.guard = ScopeGuard(session, organization_id)
         self.scanner = get_port_scanner()
         self._port_cache: dict[str, list[int]] = {}
@@ -398,9 +453,21 @@ class ScanRunner:
         return self.session.execute(stmt).scalar_one_or_none() is not None
 
     def _ports_for(self, entry: ScopeEntry | None) -> list[int]:
-        """Ports to scan for a given scope entry."""
+        """Ports to scan for a given scope entry.
+
+        The caller-supplied ``port_override`` is honoured only when the scope
+        entry itself opted in. Widening a sweep is a scope decision, so it is
+        gated on the same flag an operator uses through the API rather than on
+        whatever the calling code happens to pass.
+        """
         allowed = settings.allowed_ports
         if entry is not None and entry.allow_port_override:
+            if self.port_override:
+                # Validate range only. The allowlist check is a deployment-wide
+                # default; an operator who has opted this target into an
+                # override has already made the scope decision, and re-applying
+                # the default here would silently defeat the opt-in.
+                return sorted({p for p in self.port_override if _port_in_range(p)})
             # An operator opted this target into a wider sweep. Still bounded by
             # the global maximum so an override cannot become a full 65k scan.
             return sorted(set(allowed) | set(range(1, 1025)))
@@ -449,7 +516,7 @@ class ScanRunner:
         """Probe one target and persist observations, services and assets."""
         entry = plan.scope_entry
         ports = self._ports_for(entry)
-        valid_ports = [p for p in ports if validate_port(p) is None]
+        valid_ports = [p for p in ports if validate_port(p, allowed=ports) is None]
 
         request = ScanRequest(
             hostname=plan.hostname,
@@ -505,8 +572,6 @@ class ScanRunner:
         observations.extend(dns_result.observations)
 
         # 3. Service fingerprinting on the open ports.
-        from veyl_scanner.fingerprint import fingerprint_services
-
         fingerprints = fingerprint_services(
             plan.hostname, plan.addresses[0], open_ports, request.timeout_seconds
         )
@@ -530,11 +595,20 @@ class ScanRunner:
             observations.extend(TlsCollector().collect(request).observations)
 
         # 5. HTTP.
-        if any(p in (80, 443, 8080, 8443) or p > 1024 for p in open_ports):
+        #
+        # Only probe ports that plausibly speak HTTP. The previous condition
+        # treated *any* port above 1024 as an HTTP candidate, which meant Veyl
+        # sent HTTP (and sometimes TLS) requests at database and RPC ports and
+        # then recorded the resulting protocol errors as observations. A
+        # failed probe against a port that was never HTTP is noise, not
+        # intelligence, and it risks looking like a detection.
+        http_ports = _http_candidate_ports(open_ports, fingerprints)
+        if http_ports:
             http_collector = HttpCollector(
                 probe_paths=True,
                 discover_paths=True,
                 validate_hook=lambda h: self.guard.check(h).allowed,
+                ports=http_ports,
             )
             observations.extend(http_collector.collect(request).observations)
 
@@ -597,7 +671,11 @@ class ScanRunner:
                 asset_type=asset_type,
                 environment=infer_environment(entry, asset_key),
                 status="ACTIVE",
-                internet_exposed=bool(open_ports),
+                # Observed fact: at least one port answered. This is *not* the
+                # same as facing the internet, and Veyl does not set
+                # internet_exposed from a scan.
+                reachable=bool(open_ports),
+                internet_exposed=False,
                 authorization_status=entry.authorization_status,
                 discovery_source=(plan.discovered_via if is_new_discovery else "scope_scan"),
                 source_provenance=Provenance.OBSERVED,
@@ -627,7 +705,10 @@ class ScanRunner:
         else:
             asset.last_seen = now
             asset.ip_address = plan.addresses[0]
-            asset.internet_exposed = asset.internet_exposed or bool(open_ports)
+            # Only the observed fact is refreshed here. internet_exposed is
+            # owned by the organization's asset context and must not be
+            # rewritten by a scan.
+            asset.reachable = asset.reachable or bool(open_ports)
             if asset.status != "ACTIVE":
                 asset.status = "ACTIVE"
 
@@ -825,7 +906,8 @@ class ScanRunner:
                 if o.kind == "http_tech"
                 for t in o.data.get("technologies", [])
             ),
-            "internet_exposed": bool(open_ports),
+            "reachable": bool(open_ports),
+            "internet_exposed": asset.internet_exposed,
         }
 
         sanitized_state = deep_sanitize_json(state)
@@ -858,10 +940,10 @@ def _parse_dt(value: Any) -> datetime | None:
     if value is None:
         return None
     if isinstance(value, datetime):
-        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+        return value if value.tzinfo else value.replace(tzinfo=UTC)
     try:
         text = str(value).replace("Z", "+00:00")
         parsed = datetime.fromisoformat(text)
-        return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+        return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
     except (ValueError, TypeError):
         return None
