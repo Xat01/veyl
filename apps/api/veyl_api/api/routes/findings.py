@@ -404,7 +404,14 @@ def upsert_remediation(
 
     changes: list[str] = []
     if payload.owner is not None and payload.owner != record.owner:
-        changes.append(f"owner {record.owner.value} -> {payload.owner.value}")
+        # ``Remediation.owner`` carries a column default of UNASSIGNED, but a
+        # column default is applied by the INSERT, not by the constructor. A
+        # record created a few lines above has not been flushed yet, so its
+        # ``owner`` is still None here. Reading ``.value`` without this guard
+        # raised AttributeError on the very first remediation assignment for a
+        # finding, which is the most common case there is.
+        previous_owner = record.owner.value if record.owner is not None else "UNASSIGNED"
+        changes.append(f"owner {previous_owner} -> {payload.owner.value}")
         record.owner = payload.owner
     if payload.assignee_user_id is not None and payload.assignee_user_id != record.assignee_user_id:
         if payload.assignee_user_id:
