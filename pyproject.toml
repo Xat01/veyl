@@ -51,7 +51,6 @@ dev = [
 
 [project.scripts]
 veyl-api = "veyl_api.__main__:main"
-veyl-worker = "veyl_api.worker.__main__:main"
 veyl-demo = "veyl_api.demo.__main__:main"
 
 [tool.setuptools]
@@ -62,6 +61,12 @@ veyl-demo = "veyl_api.demo.__main__:main"
 # top-level module names obvious from this file alone.
 packages = [
   "veyl_api",
+  "veyl_api.api",
+  "veyl_api.api.routes",
+  "veyl_api.db",
+  "veyl_api.demo",
+  "veyl_api.safety",
+  "veyl_api.security",
   "veyl_rules",
   "veyl_scanner",
   "veyl_analyzer",
@@ -70,12 +75,20 @@ packages = [
 ]
 
 [tool.setuptools.package-dir]
-veyl_api = "apps/api/veyl_api"
-veyl_rules = "packages/rules/veyl_rules"
-veyl_scanner = "services/scanner/veyl_scanner"
-veyl_analyzer = "services/analyzer/veyl_analyzer"
-veyl_correlation = "services/correlation/veyl_correlation"
-veyl_reporting = "services/reporting/veyl_reporting"
+# Quoted because TOML reads a bare `veyl_api.api` as the nested key
+# `veyl_api -> api`, which collides with the `veyl_api` mapping below.
+"veyl_api" = "apps/api/veyl_api"
+"veyl_api.api" = "apps/api/veyl_api/api"
+"veyl_api.api.routes" = "apps/api/veyl_api/api/routes"
+"veyl_api.db" = "apps/api/veyl_api/db"
+"veyl_api.demo" = "apps/api/veyl_api/demo"
+"veyl_api.safety" = "apps/api/veyl_api/safety"
+"veyl_api.security" = "apps/api/veyl_api/security"
+"veyl_rules" = "packages/rules/veyl_rules"
+"veyl_scanner" = "services/scanner/veyl_scanner"
+"veyl_analyzer" = "services/analyzer/veyl_analyzer"
+"veyl_correlation" = "services/correlation/veyl_correlation"
+"veyl_reporting" = "services/reporting/veyl_reporting"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

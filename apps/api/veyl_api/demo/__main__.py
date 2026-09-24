@@ -80,6 +80,7 @@ def _ensure_demo_target_on_path() -> None:
 
 def _seed(session, *, allow_private_targets: bool) -> dict:
     """Create the organization, users, and scope entry. Idempotent."""
+    from veyl_api.api.routes.auth import _hash_totp_secret
     from veyl_api.db.base import utcnow
     from veyl_api.enums import (
         AssetOwner,
@@ -90,7 +91,6 @@ def _seed(session, *, allow_private_targets: bool) -> dict:
     from veyl_api.models import Organization, OrganizationMember, ScopeEntry, User
     from veyl_api.security.auth import hash_password
     from veyl_api.security.mfa import generate_totp_secret
-    from veyl_api.api.routes.auth import _hash_totp_secret
 
     org = (
         session.query(Organization).filter(Organization.slug == DEMO_ORG_SLUG).one_or_none()
@@ -213,13 +213,14 @@ def _run_story(session, *, org_id: str, scope_id: str, skip_scans: bool) -> dict
     from veyl_correlation.attack_paths import correlate_attack_paths
     from veyl_correlation.graph import rebuild_graph
     from veyl_scanner.runner import ScanRunner
+
     from veyl_api.enums import ScanTrigger
 
     if skip_scans:
         return {"scans": 0, "findings": 0, "changes": 0, "paths": 0}
 
-    from veyl_api.models import ExposureChange, Finding
     from veyl_api.enums import ACTIVE_FINDING_STATUSES
+    from veyl_api.models import ExposureChange, Finding
 
     server = _DemoServer()
     result = {"scans": 0, "findings": 0, "changes": 0, "paths": 0}
@@ -375,7 +376,6 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _print_summary(*, seeded: dict, story: dict, database_url: str) -> None:
-    from veyl_api.config import settings
 
     line = "=" * 76
     print(line)
