@@ -63,7 +63,21 @@ jobs:
           # developer's local .env, which would make a failure unreproducible.
           VEYL_ENV: test
           VEYL_SECRET_KEY: ci-only-secret-key-not-used-outside-this-workflow
-          VEYL_ALLOW_PRIVATE_TARGETS: "false"
+          # MUST be true. The integration tests scan a real HTTP fixture bound to
+          # loopback, and the safety floor refuses loopback when this is false.
+          #
+          # This is not a weakened control: it is the flag that exists precisely
+          # to permit a local, trusted target, and the test fixture is exactly
+          # that. Note it must be set here rather than left to tests/conftest.py,
+          # because conftest uses os.environ.setdefault — a value supplied by the
+          # job environment wins, and setting it to "false" silently turns every
+          # scanning integration test into "0 targets scanned".
+          #
+          # The SSRF refusal itself is asserted independently in the security
+          # job, which deliberately does not set this variable, and by
+          # test_loopback_is_refused_in_a_public_deployment, which overrides the
+          # setting directly.
+          VEYL_ALLOW_PRIVATE_TARGETS: "true"
         run: python -m pytest -q --tb=short -rfE
 
   security-properties:
