@@ -385,7 +385,9 @@ def _print_summary(*, seeded: dict, story: dict, database_url: str) -> None:
     print(f"  database     : {database_url}")
     print()
     print("  API          : http://localhost:8000  (start with `python -m veyl_api`)")
-    print("  Web console  : http://localhost:3000  (cd apps/web && npm run dev)")
+    print("  API docs     : http://localhost:8000/docs")
+    print("  Web console  : NOT IMPLEMENTED - apps/web is scaffold only. The API and")
+    print("                 the generated HTML reports are the interface today.")
     print()
     print("  Accounts (all use the same password):")
     print(f"    password   : {DEMO_PASSWORD}")
@@ -410,10 +412,10 @@ def _print_summary(*, seeded: dict, story: dict, database_url: str) -> None:
             print(f"    graph                : {story['graph']['nodes']} nodes, "
                   f"{story['graph']['edges']} edges")
     else:
-        print("  Scans were skipped (--skip-scans); start one from the UI or the API.")
+        print("  Scans were skipped (--skip-scans); start one from the API.")
     print()
-    print("  Next: start the API with `python -m veyl_api` and the web console")
-    print("  with `cd apps/web && npm run dev`.")
+    print("  Next: start the API with `python -m veyl_api`, then browse")
+    print("  http://localhost:8000/docs or sign in with one of the accounts above.")
     print(line)
 
 
