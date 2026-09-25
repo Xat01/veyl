@@ -213,6 +213,29 @@ Settings overrides in tests go through the `overridden_settings` context manager
 validates keys against `Settings.model_fields` and restores on exit. Mutating
 `os.environ` directly leaks between tests and produces failures that depend on order.
 
+### `VEYL_ALLOW_PRIVATE_TARGETS` must be `true` for the suite to run
+
+`conftest.py` establishes the test environment with `os.environ.setdefault(...)`. The
+integration tests scan a real HTTP fixture bound to `127.0.0.1`, so they need
+`VEYL_ALLOW_PRIVATE_TARGETS=true` — which conftest sets, but only if the variable is not
+already present. **A value supplied by the environment wins.**
+
+This caused a CI failure that looked like a product bug and was not one. The workflow set
+the variable to `"false"`, so `setdefault` did nothing, the safety floor correctly refused
+loopback, and fifteen integration tests failed on `assert scan["targets_scanned"] == 1`
+returning `0`. The product was right; the workflow was wrong.
+
+If you see mass failures that all trace back to zero targets being scanned, check this
+variable before anything else:
+
+```bash
+echo "$VEYL_ALLOW_PRIVATE_TARGETS"     # must be true (or unset) for the suite
+```
+
+This does not weaken the SSRF coverage. The security suite asserts the refusal directly,
+and `test_loopback_is_refused_in_a_public_deployment` overrides the setting itself rather
+than depending on the ambient value.
+
 ## Coverage
 
 `pytest-cov` is installed. Coverage is not enforced as a gate — a threshold produces tests
