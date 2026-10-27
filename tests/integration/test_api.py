@@ -1752,3 +1752,30 @@ def test_member_id_helper_is_only_used_by_tests():
     """Guard against the test helper leaking into a route."""
     generated = members_route.new_member_id()
     assert isinstance(generated, str) and len(generated) == 36
+
+
+def test_a_factor_enrolled_under_another_secret_is_explained_not_a_500(client, admin, session):
+    """Rotating ``VEYL_SECRET_KEY`` leaves existing TOTP secrets unreadable.
+
+    That is an operator error, not a bad password, and it used to escape the
+    login handler as a 500 with no explanation. The response must say what
+    happened and what to do about it.
+    """
+    import base64
+    import hashlib
+
+    from cryptography.fernet import Fernet
+
+    other_key = base64.urlsafe_b64encode(hashlib.sha256(b"a-different-secret").digest())
+    admin["user"].mfa_secret_hash = (
+        Fernet(other_key).encrypt(ADMIN_TOTP_SECRET.encode("ascii")).decode("ascii")
+    )
+    session.commit()
+
+    response = login(client, admin)
+
+    assert response.status_code == 409, response.text
+    detail = response.json()["detail"]
+    assert "re-enrol" in detail
+    # A 409 here must not read as "your code was wrong".
+    assert "not valid" not in detail

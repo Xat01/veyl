@@ -344,9 +344,11 @@ def main(argv: list[str] | None = None) -> int:
     # floor reads.
     os.environ.setdefault("VEYL_ALLOW_PRIVATE_TARGETS", "true")
     os.environ.setdefault("VEYL_ENV", "development")
-    os.environ.setdefault(
-        "VEYL_SECRET_KEY", "veyl-demo-secret-key-not-for-production-use-change-me"
-    )
+    # Deliberately *not* overriding VEYL_SECRET_KEY. The TOTP secret enrolled
+    # below is encrypted with whatever key is in effect, so the API that later
+    # serves this database must use the same one. Picking a demo-specific key
+    # here would make the printed "start the API with `python -m veyl_api`"
+    # instruction produce an admin account whose factor cannot be decrypted.
 
     _ensure_demo_target_on_path()
 
@@ -385,9 +387,8 @@ def _print_summary(*, seeded: dict, story: dict, database_url: str) -> None:
     print(f"  database     : {database_url}")
     print()
     print("  API          : http://localhost:8000  (start with `python -m veyl_api`)")
+    print("  Web console  : http://localhost:8000/console/")
     print("  API docs     : http://localhost:8000/docs")
-    print("  Web console  : NOT IMPLEMENTED - apps/web is scaffold only. The API and")
-    print("                 the generated HTML reports are the interface today.")
     print()
     print("  Accounts (all use the same password):")
     print(f"    password   : {DEMO_PASSWORD}")
@@ -414,8 +415,13 @@ def _print_summary(*, seeded: dict, story: dict, database_url: str) -> None:
     else:
         print("  Scans were skipped (--skip-scans); start one from the API.")
     print()
-    print("  Next: start the API with `python -m veyl_api`, then browse")
-    print("  http://localhost:8000/docs or sign in with one of the accounts above.")
+    print("  Next: start the API with `python -m veyl_api`, open")
+    print("  http://localhost:8000/console/ and sign in with one of the accounts above.")
+    print()
+    print("  One caveat: the console's 'Run a scan now' button scans the authorized")
+    print("  127.0.0.1 entry with the default port set. That is this machine's own")
+    print("  loopback, not the bundled AcmePay target, so its results describe your")
+    print("  host. The demo's own two scans are the AcmePay story.")
     print(line)
 
 

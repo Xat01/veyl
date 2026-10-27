@@ -228,7 +228,28 @@ def login(payload: LoginRequest, session: DbSession, request: Request) -> TokenR
             # The secret hash is a bcrypt of the raw secret, so the secret must
             # be reconstructed to compute a code. It is stored symmetrically
             # encrypted rather than plaintext; see ``_reveal_totp_secret``.
-            secret = _reveal_totp_secret(user)
+            try:
+                secret = _reveal_totp_secret(user)
+            except mfa_service.MFAError as exc:
+                # The deployment secret changed since this factor was enrolled.
+                # That is an operator error, not a bad password, and it must not
+                # surface as a 500 with no explanation.
+                _record_login_failure(
+                    session,
+                    request=request,
+                    organization_id=payload.organization_slug or "unknown",
+                    email=email,
+                    detail=f"the enrolled second factor could not be read: {exc}",
+                    user=user,
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=(
+                        "this account's second factor was enrolled under a different "
+                        "deployment secret and cannot be verified. The account must "
+                        "re-enrol, or the deployment must use the secret it was enrolled with."
+                    ),
+                ) from exc
             if not mfa_service.verify_totp(secret, payload.totp_code):
                 _record_login_failure(
                     session,
