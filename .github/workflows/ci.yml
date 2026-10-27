@@ -35,6 +35,25 @@ jobs:
       - name: Ruff
         run: ruff check .
 
+      # The console is served with `script-src 'self'` and no `unsafe-inline`,
+      # so an inline <script> or a style="" attribute would be silently refused
+      # by the browser and the page would break in a way no Python test sees.
+      - name: Assert the console markup is CSP-clean
+        run: |
+          python - <<'PY'
+          import re
+          from pathlib import Path
+
+          html = Path("apps/web/index.html").read_text(encoding="utf-8")
+          assert not re.search(r"<script(?![^>]*\bsrc=)", html), "inline <script> would be blocked by the CSP"
+          assert " style=" not in html, "an inline style attribute would be blocked by the CSP"
+          assert "onclick=" not in html, "inline event handlers are blocked by the CSP"
+          print("console markup is CSP-clean")
+          PY
+
+      - name: Check the console's JavaScript parses
+        run: node --check apps/web/app.js
+
   test:
     name: Test (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest

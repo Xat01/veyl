@@ -37,13 +37,19 @@ pip install -e ".[nmap]"        # python-nmap adapter (still needs the nmap bina
 
 ```bash
 python -m veyl_api.demo         # seed AcmePay and run the Day 1 -> Day 7 scans
-python -m veyl_api              # API on http://127.0.0.1:8000
+python -m veyl_api              # API + console on http://127.0.0.1:8000
 ```
 
-The demo prints the credentials and the admin's TOTP secret. Both commands are also
-installed as console scripts (`veyl-demo`, `veyl-api`).
+Then open `http://127.0.0.1:8000/console/`. The demo prints the credentials and the
+admin's TOTP secret. Both commands are also installed as console scripts (`veyl-demo`,
+`veyl-api`).
 
 Reset the demo database at any time with `--reset`. It is a SQLite file, safe to delete.
+
+The console is static files in `apps/web`, mounted at `/console` by `create_app()`.
+There is no build step and no Node dependency: edit the HTML, CSS, or JS and reload the
+browser. If the directory is missing — for example in a deployment that ships only the
+API — the mount is skipped and the API still starts.
 
 ## Tests
 
@@ -55,7 +61,7 @@ ruff check .                           # lint
 ruff check --fix .                     # autofix
 ```
 
-223 tests. The suite is fast enough to run on every save; most of it is unit and API tests
+231 tests. The suite is fast enough to run on every save; most of it is unit and API tests
 with no network. The tests that do open sockets bind loopback only.
 
 **On Windows, if pytest hangs or fails during teardown** with a bulk-delete error, it is the
@@ -91,6 +97,7 @@ services/correlation/ snapshots, graph, attack paths
 services/reporting/  HTML and JSON renderers
 
 demo/targets/        the AcmePay service the demo scans
+apps/web/            the console: index.html, styles.css, app.js (no build)
 tests/               unit, integration, security
 ```
 

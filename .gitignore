@@ -50,6 +50,8 @@ out/
 
 # Database
 *.db
+*.db-shm
+*.db-wal
 *.sqlite
 *.sqlite3
 veyl.db

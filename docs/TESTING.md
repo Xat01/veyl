@@ -3,13 +3,14 @@
 ## Running
 
 ```bash
-python -m pytest                    # 223 tests
+python -m pytest                    # 231 tests
 python -m pytest tests/security -v  # the safety properties, verbose
 python -m pytest -k ssrf            # by keyword
 python -m pytest --tb=long -x       # stop at the first failure
 ruff check .
 
 python scripts/acceptance_test.py   # 35-step end-to-end run over HTTP (§47)
+node scripts/console_e2e.mjs        # the console, driven in a real browser
 ```
 
 The acceptance test is separate from pytest on purpose. See
@@ -39,7 +40,8 @@ Everything else is ordinary correctness. Those four are the product.
 
 | File | Tests | Covers |
 | --- | --- | --- |
-| `tests/integration/test_api.py` | 109 | the full HTTP surface, auth, MFA, RBAC, tenant isolation |
+| `tests/integration/test_api.py` | 110 | the full HTTP surface, auth, MFA, RBAC, tenant isolation |
+| `tests/integration/test_web_console.py` | 7 | the console is served, carries a strict CSP, and does not serve files outside its directory |
 | `tests/security/test_ssrf_floor.py` | 63 | address classification and every SSRF encoding |
 | `tests/security/test_scope_enforcement.py` | 35 | authorization boundaries |
 | `tests/security/test_audit_chain.py` | 10 | hash-chain integrity |
@@ -83,7 +85,31 @@ right). The eleventh was a real defect. Each wrong expectation was corrected aga
 actual schema rather than by relaxing the assertion, because a test that is loosened to pass
 is worse than no test.
 
+## The console test
 
+`scripts/console_e2e.mjs` drives the real page in a real browser. It needs no
+dependencies: Node 22 has a WebSocket client, so the script talks to headless Chrome
+over the DevTools Protocol directly. Playwright would have been easier and would also
+have been one more thing to install.
+
+```bash
+python -m veyl_api.demo --reset        # note the TOTP secret it prints
+python -m veyl_api                     # in another shell
+VEYL_TOTP_SECRET=<the secret> node scripts/console_e2e.mjs
+```
+
+It asserts behaviour, not markup: that the analyst can sign in, that each view renders
+rows from the API, that changing a finding's status persists and can be reversed, that
+saving a remediation returns without a `500`, that a scan started from the button
+actually produces a new scan row, that a report can be generated, and that the
+administrator can sign in through the TOTP path. Screenshots and a JSON report land in
+`artifacts/console/`.
+
+Two defects were found this way and nowhere else: the second-factor input was visible on
+first load (a `display: block` rule beat the `[hidden]` attribute), and the demo enrolled
+its admin's TOTP secret under a secret key the API did not use, so the admin login
+returned `500` unless `VEYL_SECRET_KEY` was set to a demo-specific value. The second is
+now a `409` with an explanation, and the demo no longer overrides the key.
 
 ## The suites that matter
 

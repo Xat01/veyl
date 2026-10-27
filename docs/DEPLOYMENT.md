@@ -186,8 +186,9 @@ Before using it in anything real:
 - [ ] An `EXECUTIVE` account for whoever needs reporting without scan access
 - [ ] Scope entries registered, and only for assets you are authorized to test
 - [ ] Log aggregation capturing the audit log
-- [ ] A decision recorded about whether the console (`apps/web`, not built) is needed, since
-      the API and HTML reports are the interface today
+- [ ] A decision recorded about whether to serve the console (`/console`) from the same
+      host, or ship the API alone and keep the console off production. It is a static
+      directory, so removing it is a deployment choice rather than a code change.
 
 ## Scaling notes
 

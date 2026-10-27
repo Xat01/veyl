@@ -132,7 +132,12 @@ Stated plainly so nobody has to discover them:
   is no worker, and no queue. This is a capacity limitation, not a safety one.
 - **No database-level row security.** Tenant isolation is application-enforced.
 - **PDF reporting returns 501.** Deliberately not implemented rather than half-implemented.
-- **The `apps/web` console does not exist yet.** Its absence is not a security control.
+- **The console is a static page with no build pipeline.** It is served with a
+  `default-src 'self'` CSP and escapes everything the API returns, but it has not been
+  through a third-party front-end security review, and it has no dependency-update
+  process because it has no dependencies. Its session token lives in `sessionStorage`,
+  so an XSS in the console would expose it; the CSP is what makes that hard, not
+  impossible.
 - **The demo environment sets a known password and enables private targets.** It is for
   local evaluation only and says so when it runs.
 

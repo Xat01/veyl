@@ -39,14 +39,18 @@ so the boundary is stated here rather than discovered later.
 | Reports: HTML and JSON | Implemented. |
 | REST API + JWT auth, MFA (TOTP), WebAuthn, lockout, RBAC | Implemented. |
 | Tamper-evident audit log (per-tenant hash chain) | Implemented, with `verify_chain()`. |
+| Web console (dashboard, findings, assets, scope, changes, paths, scans, reports, audit) | Implemented. Static, build-free, served by the API at `/console/`. |
 | AcmePay demo environment | Implemented. One command, real scans. |
 
 **NOT IMPLEMENTED — do not expect these**
 
 - **PDF reports.** The endpoint returns `501 Not Implemented` on purpose. A format
   request that returns a broken file is worse than one that says no.
-- **The Next.js console (`apps/web`).** Scaffolded, not built. There is currently no
-  web UI; the API and the generated HTML reports are the interface.
+- **A Next.js console.** The console in `apps/web` is a static HTML/JS application
+  served by the API, not the Next.js app an earlier draft described. It covers the
+  analyst workflow; it has no member management, no WebAuthn enrolment ceremony, and
+  no realtime updates. See [apps/web/README.md](apps/web/README.md) for the exact
+  boundary and the reasoning.
 - **Background job queue.** Scans run synchronously inside the API request. There is no
   worker process, and no `veyl-worker` command ships. Submitting to a queue with nothing
   consuming it would present as a hang, which is a worse failure than a slow request.
@@ -63,7 +67,7 @@ so the boundary is stated here rather than discovered later.
 
 ```
 apps/api              FastAPI application: HTTP layer, models, safety floor, auth
-apps/web              Next.js console — SCAFFOLD ONLY, not built (see Status)
+apps/web              Web console — static HTML/CSS/JS, served by the API at /console/
 packages/rules        Deterministic detection rules + rule framework
 services/scanner      Authorized discovery: DNS, ports, TLS, HTTP, fingerprinting
 services/analyzer     Rule evaluation -> findings + evidence + risk
@@ -76,7 +80,8 @@ tests                 Unit, integration, and security suites
 
 ## Quick start
 
-Requires Python 3.11+ (developed on 3.13).
+Requires Python 3.11+ (developed on 3.13). Node is **not** required — the console
+has no build step.
 
 ```bash
 python -m venv .venv
@@ -88,14 +93,26 @@ Build the demo environment, then start the API:
 
 ```bash
 python -m veyl_api.demo        # seeds AcmePay and runs the Day 1 -> Day 7 scans
-python -m veyl_api             # API on http://127.0.0.1:8000
+python -m veyl_api             # API + console on http://127.0.0.1:8000
 ```
 
-`veyl-api` and `veyl-demo` are installed as console scripts by `pip install -e`, and are
-equivalent to the `python -m` forms above. The demo prints the login credentials and the
-TOTP secret for the admin account at the end of its run — read them from there.
+Open **http://127.0.0.1:8000/console/** and sign in. The demo prints the
+credentials at the end of its run:
 
-Interactive API documentation is served at `http://127.0.0.1:8000/docs`.
+| Account | Password | Second factor |
+| --- | --- | --- |
+| `analyst@acmepay.example` | `Veyl-Demo-Password-1!` | none |
+| `executive@acmepay.example` | `Veyl-Demo-Password-1!` | none |
+| `admin@acmepay.example` | `Veyl-Demo-Password-1!` | TOTP — the demo prints the secret |
+
+For the admin account, open **"Local demo helper"** on the sign-in screen, paste
+the secret the demo printed, and it computes the current code in the page.
+
+`veyl-api` and `veyl-demo` are installed as console scripts by `pip install -e`, and are
+equivalent to the `python -m` forms above.
+
+The API's own documentation is at `http://127.0.0.1:8000/docs`; it is a reference for
+integrating, not the way to use the product.
 
 Useful flags:
 
@@ -112,7 +129,7 @@ non-loopback bind or a production environment.
 ## Tests
 
 ```bash
-python -m pytest                      # 223 tests
+python -m pytest                      # 231 tests
 python -m pytest tests/security -v    # the safety properties specifically
 python scripts/acceptance_test.py     # 35-step end-to-end run over HTTP
 ruff check .

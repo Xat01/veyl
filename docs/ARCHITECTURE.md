@@ -241,7 +241,14 @@ module names are obvious from that file alone.
 
 - `apps/api` — FastAPI, SQLite by default, Postgres optional
 - `packages/rules`, `services/*` — libraries, no process of their own
-- `apps/web` — Next.js console, **scaffold only, not built**
+- `apps/web` — static console, mounted at `/console` by the API; no build step
+
+The console is served from the API's own origin rather than by a separate front-end
+server. That removes CORS from the picture, keeps one authentication implementation
+(the API's), and means `python -m veyl_api` is the only process needed to use the
+product. The cost is that the console cannot be deployed independently of the API —
+acceptable for an application that is one product, not a front end over someone
+else's API.
 
 There is no worker process. Scans run synchronously inside the API request. See
 [DEPLOYMENT.md](DEPLOYMENT.md) for the capacity implication and what a real queue would
