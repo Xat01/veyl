@@ -21,11 +21,13 @@ import logging
 import time
 import uuid
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 from starlette.middleware.base import BaseHTTPMiddleware
 
@@ -60,6 +62,29 @@ _SECURITY_HEADERS = {
     "Cache-Control": "no-store",
 }
 
+#: Content-Security-Policy for the bundled console only.
+#:
+#: It is applied to ``/console`` rather than globally because the generated API
+#: documentation at ``/docs`` loads its assets from a CDN and uses inline
+#: scripts, so a strict policy applied everywhere would break it. The console
+#: itself has no inline script or style, which is what makes this policy
+#: possible without an ``unsafe-inline`` exception.
+_CONSOLE_CSP = (
+    "default-src 'self'; "
+    "script-src 'self'; "
+    "style-src 'self'; "
+    "img-src 'self' data:; "
+    "connect-src 'self'; "
+    "base-uri 'none'; "
+    "form-action 'none'; "
+    "frame-ancestors 'none'"
+)
+
+#: The console is plain static files in ``apps/web``. Resolved relative to this
+#: module so a source checkout works without configuration; a deployment that
+#: packages the API without the console simply does not get the mount.
+_WEB_CONSOLE_DIR = Path(__file__).resolve().parents[3] / "web"
+
 
 class RequestIdMiddleware(BaseHTTPMiddleware):
     """Attach a request id, and echo it back so a client can cite it in a report."""
@@ -79,6 +104,8 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response = await call_next(request)
         for header, value in _SECURITY_HEADERS.items():
             response.headers.setdefault(header, value)
+        if request.url.path.startswith("/console"):
+            response.headers.setdefault("Content-Security-Policy", _CONSOLE_CSP)
         # HSTS only makes sense over TLS; setting it on a plain-HTTP dev server
         # would make the browser refuse to talk to localhost again.
         if settings.env == "production":
@@ -225,6 +252,21 @@ def create_app() -> FastAPI:
     app.include_router(rules.router, prefix=f"{prefix}/rules", tags=["rules"])
     app.include_router(audit.router, prefix=f"{prefix}/audit", tags=["audit"])
     app.include_router(assets.dashboard_router, prefix=f"{prefix}/dashboard", tags=["dashboard"])
+
+    # The console is served from the same origin as the API on purpose: it keeps
+    # cookies and tokens out of cross-origin traffic, makes CORS irrelevant, and
+    # means one process is enough to evaluate the product end to end.
+    if _WEB_CONSOLE_DIR.is_dir():
+        app.mount(
+            "/console",
+            StaticFiles(directory=str(_WEB_CONSOLE_DIR), html=True),
+            name="console",
+        )
+
+        @app.get("/", include_in_schema=False)
+        def _console_root() -> RedirectResponse:
+            """Send a browser pointed at the bare host to the console."""
+            return RedirectResponse(url="/console/")
 
     return app
 

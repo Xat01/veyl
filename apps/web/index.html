@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Veyl — Continuous Exposure Intelligence</title>
+<link rel="stylesheet" href="styles.css">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230d1218'/%3E%3Cpath d='M8 9l8 15 8-15' stroke='%2338d3c6' stroke-width='3' fill='none'/%3E%3C/svg%3E">
+</head>
+<body>
+
+<!-- Sign-in ----------------------------------------------------------------->
+<section id="login" class="login hidden">
+  <form class="login-card" id="login-form" autocomplete="on">
+    <div class="brand brand-lg">
+      <span class="brand-mark" aria-hidden="true">V</span>
+      <span>
+        <strong>VEYL</strong>
+        <small>Continuous Exposure Intelligence</small>
+      </span>
+    </div>
+
+    <label class="field">
+      <span>Email</span>
+      <input id="login-email" name="email" type="email" autocomplete="username"
+             placeholder="analyst@acmepay.example" required>
+    </label>
+
+    <label class="field">
+      <span>Password</span>
+      <input id="login-password" name="password" type="password"
+             autocomplete="current-password" required>
+    </label>
+
+    <label class="field" id="totp-field" hidden>
+      <span>Second-factor code</span>
+      <input id="login-totp" name="totp" type="text" inputmode="numeric"
+             autocomplete="one-time-code" maxlength="8" placeholder="123456">
+      <small>This account has a factor enrolled. Enter the 6-digit code.</small>
+    </label>
+
+    <p class="form-error" id="login-error" role="alert" hidden></p>
+
+    <button class="btn btn-primary btn-block" type="submit" id="login-submit">Sign in</button>
+
+    <details class="hint" id="totp-helper">
+      <summary>Local demo helper: compute a code from the TOTP secret</summary>
+      <p class="muted">
+        The demo prints a TOTP secret when it seeds the database. Paste it here to
+        generate the current code in this browser. Nothing leaves the page.
+      </p>
+      <div class="row">
+        <input id="helper-secret" type="text" placeholder="BASE32 SECRET" spellcheck="false">
+        <button class="btn" type="button" id="helper-generate">Generate</button>
+      </div>
+      <p class="mono" id="helper-code"></p>
+    </details>
+  </form>
+</section>
+
+<!-- Application ------------------------------------------------------------>
+<div id="app" class="app hidden">
+  <aside class="sidebar">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true">V</span>
+      <span>
+        <strong>VEYL</strong>
+        <small>Exposure Intelligence</small>
+      </span>
+    </div>
+
+    <nav class="nav" id="nav">
+      <a href="#/dashboard" data-view="dashboard"><span class="nav-dot"></span>Dashboard</a>
+      <a href="#/findings" data-view="findings"><span class="nav-dot"></span>Findings</a>
+      <a href="#/assets" data-view="assets"><span class="nav-dot"></span>Assets</a>
+      <a href="#/scope" data-view="scope"><span class="nav-dot"></span>Scope registry</a>
+      <a href="#/changes" data-view="changes"><span class="nav-dot"></span>Exposure changes</a>
+      <a href="#/paths" data-view="paths"><span class="nav-dot"></span>Attack paths</a>
+      <a href="#/scans" data-view="scans"><span class="nav-dot"></span>Scans</a>
+      <a href="#/reports" data-view="reports"><span class="nav-dot"></span>Reports</a>
+      <a href="#/audit" data-view="audit"><span class="nav-dot"></span>Audit log</a>
+    </nav>
+
+    <div class="sidebar-foot">
+      <div id="org-chip" class="org-chip"></div>
+      <button class="btn btn-ghost btn-block" id="signout" type="button">Sign out</button>
+    </div>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <div>
+        <h1 id="view-title">Dashboard</h1>
+        <p id="view-sub" class="muted"></p>
+      </div>
+      <div class="who" id="who"></div>
+    </header>
+    <div id="view" class="view"></div>
+  </main>
+</div>
+
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+<script src="app.js"></script>
+</body>
+</html>
